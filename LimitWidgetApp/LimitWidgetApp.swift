@@ -19,7 +19,7 @@ struct LimitWidgetApp: App {
     var body: some Scene {
         Window("LimitWidget Studio", id: "main") {
             MainWindowView(store: store)
-                .frame(width: 820)
+                .frame(width: 880)
         }
         .windowResizability(.contentSize)
     }

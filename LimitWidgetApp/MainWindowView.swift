@@ -3,8 +3,8 @@ import SwiftUI
 /// Tüm aboneliklerin yönetildiği ve detaylı stüdyo telemetri kartlarının gösterildiği ana pencere.
 struct MainWindowView: View {
     enum FilterOption: String, CaseIterable, Identifiable {
-        case all = "Tüm Sağlayıcılar"
-        case attention = "Yüksek Yük (%70+)"
+        case all = "Tümü"
+        case attention = "Yüksek (%70+)"
 
         var id: String { rawValue }
     }
@@ -248,11 +248,14 @@ struct MainWindowView: View {
             Text(label)
                 .font(.system(size: 9, weight: .semibold, design: .rounded))
                 .kerning(0.7)
+                .lineLimit(1)
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(.system(size: 15, weight: .bold, design: .monospaced))
+                .lineLimit(1)
                 .foregroundStyle(valueColor)
         }
+        .fixedSize(horizontal: true, vertical: false)
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
     }
@@ -266,9 +269,9 @@ struct MainWindowView: View {
     // MARK: - Studio Control Bar
 
     private var studioControlBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             // Filtre Kapsülü
-            HStack(spacing: 3) {
+            HStack(spacing: 2) {
                 ForEach(FilterOption.allCases) { option in
                     let isSelected = filterOption == option
                     Button {
@@ -278,14 +281,16 @@ struct MainWindowView: View {
                     } label: {
                         Text(option.rawValue)
                             .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .foregroundStyle(isSelected ? .primary : .secondary)
-                            .padding(.horizontal, 11)
+                            .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(
                                 Capsule(style: .continuous)
                                     .fill(
                                         isSelected
-                                            ? (colorScheme == .dark ? Color.white.opacity(0.12) : Color.white)
+                                            ? (colorScheme == .dark ? Color.white.opacity(0.14) : Color.white)
                                             : Color.clear
                                     )
                             )
@@ -294,6 +299,7 @@ struct MainWindowView: View {
                 }
             }
             .padding(3)
+            .fixedSize(horizontal: true, vertical: false)
             .background(
                 Capsule(style: .continuous)
                     .fill(StudioPalette.recessedWell(for: colorScheme))
@@ -307,7 +313,7 @@ struct MainWindowView: View {
             )
 
             // Sıralama Seçici
-            HStack(spacing: 3) {
+            HStack(spacing: 2) {
                 ForEach(SortOption.allCases) { option in
                     let isSelected = sortOption == option
                     Button {
@@ -317,6 +323,8 @@ struct MainWindowView: View {
                     } label: {
                         Text(option.rawValue)
                             .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .foregroundStyle(isSelected ? .primary : .secondary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
@@ -324,7 +332,7 @@ struct MainWindowView: View {
                                 Capsule(style: .continuous)
                                     .fill(
                                         isSelected
-                                            ? (colorScheme == .dark ? Color.white.opacity(0.12) : Color.white)
+                                            ? (colorScheme == .dark ? Color.white.opacity(0.14) : Color.white)
                                             : Color.clear
                                     )
                             )
@@ -333,6 +341,7 @@ struct MainWindowView: View {
                 }
             }
             .padding(3)
+            .fixedSize(horizontal: true, vertical: false)
             .background(
                 Capsule(style: .continuous)
                     .fill(StudioPalette.recessedWell(for: colorScheme))
@@ -346,7 +355,7 @@ struct MainWindowView: View {
             )
 
             // Tema Seçici (Sistem / Koyu / Açık)
-            HStack(spacing: 3) {
+            HStack(spacing: 2) {
                 ForEach(AppThemeMode.allCases) { mode in
                     let isSelected = store.themeMode == mode
                     Button {
@@ -359,7 +368,9 @@ struct MainWindowView: View {
                                 .font(.system(size: 10, weight: .semibold))
                             Text(mode.displayName)
                                 .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(isSelected ? .primary : .secondary)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
@@ -367,7 +378,7 @@ struct MainWindowView: View {
                             Capsule(style: .continuous)
                                 .fill(
                                     isSelected
-                                        ? (colorScheme == .dark ? Color.white.opacity(0.12) : Color.white)
+                                        ? (colorScheme == .dark ? Color.white.opacity(0.14) : Color.white)
                                         : Color.clear
                                 )
                         )
@@ -376,6 +387,7 @@ struct MainWindowView: View {
                 }
             }
             .padding(3)
+            .fixedSize(horizontal: true, vertical: false)
             .background(
                 Capsule(style: .continuous)
                     .fill(StudioPalette.recessedWell(for: colorScheme))
@@ -388,7 +400,7 @@ struct MainWindowView: View {
                     )
             )
 
-            Spacer()
+            Spacer(minLength: 8)
 
             Button {
                 showResetConfirmation = true
@@ -396,9 +408,11 @@ struct MainWindowView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.counterclockwise")
                         .font(.system(size: 10.5, weight: .semibold))
-                    Text("Şablonu Sıfırla")
+                    Text("Sıfırla")
                         .font(.system(size: 11.5, weight: .medium))
+                        .lineLimit(1)
                 }
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -415,6 +429,7 @@ struct MainWindowView: View {
                 )
             }
             .buttonStyle(.plain)
+            .help("Varsayılan sağlayıcı şablonunu geri yükle")
 
             Button {
                 Task { await store.syncLocalUsageAsync() }
@@ -429,7 +444,9 @@ struct MainWindowView: View {
                     }
                     Text("Canlı Ölç")
                         .font(.system(size: 11.5, weight: .semibold))
+                        .lineLimit(1)
                 }
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 6)
@@ -456,7 +473,9 @@ struct MainWindowView: View {
                         .font(.system(size: 11, weight: .bold))
                     Text("Sağlayıcı Ekle")
                         .font(.system(size: 11.5, weight: .semibold))
+                        .lineLimit(1)
                 }
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
