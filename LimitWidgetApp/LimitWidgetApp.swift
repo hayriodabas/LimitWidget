@@ -28,10 +28,11 @@ struct LimitWidgetApp: App {
 /// Üst menü çubuğundaki `%XX` göstergesini yöneten, üzerine fareyle gelindiğinde (hover)
 /// aşağı doğru tüm sağlayıcı oranlarını gösteren açılır panel denetleyicisi.
 @MainActor
-final class StatusBarController: NSObject, NSPopoverDelegate {
+final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDelegate {
     private let store: SubscriptionStore
     private let statusItem: NSStatusItem
     private let popover: NSPopover
+    private var fallbackStudioWindow: NSWindow?
     private var isPinnedByClick = false
     private var isPointerInButton = false
     private var isPointerInPopover = false
@@ -44,6 +45,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         self.popover = NSPopover()
         super.init()
 
+        NSApplication.shared.delegate = self
         configurePopover()
         configureStatusButton()
         applyThemeAppearance()
@@ -54,6 +56,13 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             self?.bringMainWindowToFront()
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            bringMainWindowToFront()
+        }
+        return true
     }
 
     private func applyThemeAppearance() {
@@ -217,9 +226,26 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 
     private func bringMainWindowToFront() {
         NSApp.activate(ignoringOtherApps: true)
-        for window in NSApp.windows where window.title.contains("LimitWidget") {
-            window.makeKeyAndOrderFront(nil)
+        if let existing = NSApp.windows.first(where: { $0.title.contains("LimitWidget") }) {
+            existing.isReleasedWhenClosed = false
+            existing.makeKeyAndOrderFront(nil)
+            return
         }
+        if let fallback = fallbackStudioWindow {
+            fallback.makeKeyAndOrderFront(nil)
+            return
+        }
+        let hosting = NSHostingController(
+            rootView: MainWindowView(store: store).frame(width: 880)
+        )
+        hosting.sizingOptions = [.preferredContentSize]
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "LimitWidget Studio"
+        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        fallbackStudioWindow = window
     }
 
     func popoverDidClose(_ notification: Notification) {
