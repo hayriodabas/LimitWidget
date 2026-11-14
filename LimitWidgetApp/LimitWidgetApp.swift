@@ -47,7 +47,13 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         configurePopover()
         configureStatusButton()
         applyThemeAppearance()
+        if let appIcon = NSImage(named: "AppIcon") {
+            NSApplication.shared.applicationIconImage = appIcon
+        }
         observeStoreChanges()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.bringMainWindowToFront()
+        }
     }
 
     private func applyThemeAppearance() {
