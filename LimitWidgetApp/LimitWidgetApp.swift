@@ -17,22 +17,20 @@ struct LimitWidgetApp: App {
     }
 
     var body: some Scene {
-        Window("LimitWidget Studio", id: "main") {
-            MainWindowView(store: store)
-                .frame(width: 880)
+        Settings {
+            EmptyView()
         }
-        .windowResizability(.contentSize)
     }
 }
 
 /// Üst menü çubuğundaki `%XX` göstergesini yöneten, üzerine fareyle gelindiğinde (hover)
 /// aşağı doğru tüm sağlayıcı oranlarını gösteren açılır panel denetleyicisi.
 @MainActor
-final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDelegate {
+final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDelegate, NSWindowDelegate {
     private let store: SubscriptionStore
     private let statusItem: NSStatusItem
     private let popover: NSPopover
-    private var fallbackStudioWindow: NSWindow?
+    private var studioWindow: NSWindow?
     private var isPinnedByClick = false
     private var isPointerInButton = false
     private var isPointerInPopover = false
@@ -46,6 +44,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         super.init()
 
         NSApplication.shared.delegate = self
+        NSApplication.shared.setActivationPolicy(.accessory)
         configurePopover()
         configureStatusButton()
         applyThemeAppearance()
@@ -58,10 +57,12 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         }
     }
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.accessory)
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
-            bringMainWindowToFront()
-        }
+        bringMainWindowToFront()
         return true
     }
 
@@ -77,6 +78,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         }
         NSApp.appearance = appearance
         popover.appearance = appearance
+        studioWindow?.appearance = appearance
     }
 
     private func configurePopover() {
@@ -225,14 +227,15 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
     }
 
     private func bringMainWindowToFront() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let existing = NSApp.windows.first(where: { $0.title.contains("LimitWidget") }) {
-            existing.isReleasedWhenClosed = false
+        NSApp.setActivationPolicy(.accessory)
+        if let existing = studioWindow ?? NSApp.windows.first(where: { $0.title.contains("LimitWidget") }) {
+            configureStudioWindow(existing)
+            if existing.isMiniaturized {
+                existing.deminiaturize(nil)
+            }
             existing.makeKeyAndOrderFront(nil)
-            return
-        }
-        if let fallback = fallbackStudioWindow {
-            fallback.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            studioWindow = existing
             return
         }
         let hosting = NSHostingController(
@@ -242,10 +245,50 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         let window = NSWindow(contentViewController: hosting)
         window.title = "LimitWidget Studio"
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.isReleasedWhenClosed = false
+        configureStudioWindow(window)
         window.center()
         window.makeKeyAndOrderFront(nil)
-        fallbackStudioWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        studioWindow = window
+    }
+
+    private func configureStudioWindow(_ window: NSWindow) {
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        if let minimizeButton = window.standardWindowButton(.miniaturizeButton) {
+            minimizeButton.target = self
+            minimizeButton.action = #selector(hideStudioWindowToMenuBar(_:))
+        }
+    }
+
+    @objc private func hideStudioWindowToMenuBar(_ sender: Any?) {
+        let targetWindow = (sender as? NSButton)?.window ?? studioWindow
+        targetWindow?.orderOut(nil)
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        NSApp.setActivationPolicy(.accessory)
+        return false
+    }
+
+    func windowWillMiniaturize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        DispatchQueue.main.async {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.orderOut(nil)
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        window.deminiaturize(nil)
+        window.orderOut(nil)
+        NSApp.setActivationPolicy(.accessory)
     }
 
     func popoverDidClose(_ notification: Notification) {
