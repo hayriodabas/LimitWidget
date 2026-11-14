@@ -188,8 +188,8 @@ enum StudioPalette {
 
     static func meterTrack(for scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(red: 0.038, green: 0.044, blue: 0.058)
-            : Color(red: 0.890, green: 0.904, blue: 0.928)
+            ? Color.white.opacity(0.085)
+            : Color.black.opacity(0.075)
     }
 }
 
@@ -520,17 +520,32 @@ struct StudioMeterBar: View {
                         .offset(x: width * 0.90)
                 }
 
-                // Aktif Doluluk Katmanı (İlerledikçe renk değiştiren spektrum gradyanı)
+                // Aktif Doluluk Katmanı (İlerledikçe renk değiştiren sıvı cam spektrum gradyanı)
                 if clamped > 0 {
                     ZStack(alignment: .trailing) {
                         RoundedRectangle(cornerRadius: height * 0.45, style: .continuous)
                             .fill(StudioPalette.progressiveGradient(for: clamped))
+                            .overlay(alignment: .top) {
+                                // Üst yarı sıvı cam kırılma parlaması (Liquid Glass Specular Band)
+                                RoundedRectangle(cornerRadius: height * 0.45, style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.white.opacity(0.45),
+                                                Color.white.opacity(0.05)
+                                            ],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .frame(height: max(height * 0.48, 2))
+                            }
                             .overlay(
                                 // Üst speküler parlama çizgisi
                                 RoundedRectangle(cornerRadius: height * 0.45, style: .continuous)
                                     .strokeBorder(
                                         LinearGradient(
-                                            colors: [Color.white.opacity(0.38), Color.clear],
+                                            colors: [Color.white.opacity(0.52), Color.white.opacity(0.10)],
                                             startPoint: .top,
                                             endPoint: .bottom
                                         ),
@@ -541,15 +556,15 @@ struct StudioMeterBar: View {
                         // Sağ uçtaki parlak gösterge çizgisi (Leading-edge specular cap)
                         if fillWidth > 6 {
                             RoundedRectangle(cornerRadius: 1, style: .continuous)
-                                .fill(Color.white.opacity(0.88))
+                                .fill(Color.white.opacity(0.92))
                                 .frame(width: 1.5, height: max(height - 2.5, 3))
                                 .padding(.trailing, 1.5)
                         }
                     }
                     .frame(width: min(fillWidth, width), height: height)
                     .shadow(
-                        color: tipColor.opacity(clamped >= 0.75 ? 0.40 : 0.24),
-                        radius: clamped >= 0.75 ? 5 : 3,
+                        color: tipColor.opacity(clamped >= 0.75 ? 0.45 : 0.30),
+                        radius: clamped >= 0.75 ? 5 : 3.5,
                         x: 0,
                         y: 0
                     )

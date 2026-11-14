@@ -69,8 +69,136 @@ struct LimitDesktopWidgetEntryView: View {
         }
         .environment(\.colorScheme, colorScheme)
         .containerBackground(for: .widget) {
-            StudioPalette.windowCanvas(for: colorScheme)
+            glassWidgetCanvas
         }
+    }
+
+    /// Google Liquid Glass / Buzlu Prizmatik Cam arka plan katmanı.
+    private var glassWidgetCanvas: some View {
+        ZStack {
+            // Masaüstü duvar kağıdını flulaştıran yarı saydam buzlu cam tabanı
+            Rectangle()
+                .fill(.ultraThinMaterial)
+
+            // Kontrast ve derinlik için çok hafif cam tonu
+            Rectangle()
+                .fill(
+                    colorScheme == .dark
+                        ? Color(red: 0.05, green: 0.07, blue: 0.13).opacity(0.32)
+                        : Color.white.opacity(0.24)
+                )
+
+            // Sol-üst Google Aura camgöbeği/mavi ışık kırılması
+            RadialGradient(
+                colors: [
+                    Color(red: 0.12, green: 0.76, blue: 0.96).opacity(colorScheme == .dark ? 0.22 : 0.18),
+                    Color.clear
+                ],
+                center: .topLeading,
+                startRadius: 8,
+                endRadius: 210
+            )
+
+            // Sağ-alt prizmatik indigo/zümrüt ışık yansıması
+            RadialGradient(
+                colors: [
+                    Color(red: 0.42, green: 0.38, blue: 0.98).opacity(colorScheme == .dark ? 0.20 : 0.14),
+                    Color(red: 0.06, green: 0.75, blue: 0.52).opacity(colorScheme == .dark ? 0.10 : 0.08),
+                    Color.clear
+                ],
+                center: .bottomTrailing,
+                startRadius: 10,
+                endRadius: 230
+            )
+
+            // Diyagonal cam yüzey parlaması (Specular Glass Sheen)
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(colorScheme == .dark ? 0.18 : 0.52),
+                    Color.white.opacity(colorScheme == .dark ? 0.03 : 0.12),
+                    Color.white.opacity(colorScheme == .dark ? 0.08 : 0.26)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            // Dış çerçeve prizmatik cam kenarlığı
+            ContainerRelativeShape()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(colorScheme == .dark ? 0.42 : 0.85),
+                            Color(red: 0.35, green: 0.82, blue: 0.98).opacity(0.28),
+                            Color.white.opacity(colorScheme == .dark ? 0.08 : 0.25)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1.1
+                )
+        }
+    }
+
+    /// Her sağlayıcı satırını yarı şeffaf, ışığı kıran 3B cam kapsül içinde sarmalar.
+    private func glassCard<Content: View>(
+        for subscription: AISubscription,
+        cornerRadius: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let brand = ProviderBrand.resolve(for: subscription)
+        let tipColor = StudioPalette.progressiveColor(for: subscription.usageRatio)
+
+        return content()
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(colorScheme == .dark ? 0.14 : 0.62),
+                                    Color.white.opacity(colorScheme == .dark ? 0.05 : 0.30)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+
+                    // Sağlayıcı renginde hafif iç cam kırılması
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    brand.primary.opacity(colorScheme == .dark ? 0.12 : 0.09),
+                                    tipColor.opacity(colorScheme == .dark ? 0.08 : 0.06),
+                                    Color.clear
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                }
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.38 : 0.82),
+                                brand.secondary.opacity(colorScheme == .dark ? 0.30 : 0.25),
+                                Color.white.opacity(colorScheme == .dark ? 0.07 : 0.24)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.9
+                    )
+            )
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.20 : 0.06),
+                radius: 5,
+                x: 0,
+                y: 2
+            )
     }
 
     private var smallLayout: some View {
@@ -82,13 +210,11 @@ struct LimitDesktopWidgetEntryView: View {
                 emptyState
             } else {
                 ForEach(items) { subscription in
-                    SubscriptionProgressRow(subscription: subscription, style: .widgetSmall)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(StudioPalette.recessedWell(for: colorScheme))
-                        )
+                    glassCard(for: subscription, cornerRadius: 9) {
+                        SubscriptionProgressRow(subscription: subscription, style: .widgetSmall)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                    }
                 }
             }
 
@@ -112,35 +238,26 @@ struct LimitDesktopWidgetEntryView: View {
             } else {
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(items) { subscription in
-                        VStack(alignment: .leading, spacing: 4) {
-                            SubscriptionProgressRow(subscription: subscription, style: .widgetSmall)
+                        glassCard(for: subscription, cornerRadius: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                SubscriptionProgressRow(subscription: subscription, style: .widgetSmall)
 
-                            HStack(spacing: 4) {
-                                Text(subscription.compactSummaryText)
-                                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                                HStack(spacing: 4) {
+                                    Text(subscription.compactSummaryText)
+                                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
 
-                                Spacer(minLength: 2)
+                                    Spacer(minLength: 2)
 
-                                Text(subscription.formattedResetCountdown())
-                                    .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(.secondary)
+                                    Text(subscription.formattedResetCountdown())
+                                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
                             }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(StudioPalette.recessedWell(for: colorScheme))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .strokeBorder(
-                                    colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.06),
-                                    lineWidth: 0.75
-                                )
-                        )
                     }
                 }
             }
@@ -160,20 +277,11 @@ struct LimitDesktopWidgetEntryView: View {
             } else {
                 VStack(spacing: 7) {
                     ForEach(items) { subscription in
-                        SubscriptionProgressRow(subscription: subscription, style: .widgetRegular)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(StudioPalette.recessedWell(for: colorScheme))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(
-                                        colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.06),
-                                        lineWidth: 0.75
-                                    )
-                            )
+                        glassCard(for: subscription, cornerRadius: 11) {
+                            SubscriptionProgressRow(subscription: subscription, style: .widgetRegular)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                        }
                     }
                 }
             }
@@ -189,7 +297,7 @@ struct LimitDesktopWidgetEntryView: View {
         let peakColor = StudioPalette.progressiveColor(for: Double(peak) / 100.0)
 
         return HStack(spacing: 6) {
-            StudioStatusDot(color: peakColor, size: 5.5)
+            StudioStatusDot(color: peakColor, size: 6)
 
             Text(title)
                 .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -206,6 +314,16 @@ struct LimitDesktopWidgetEntryView: View {
                 Text("TAVAN %\(peak)")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundStyle(peakColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.45))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.25 : 0.65), lineWidth: 0.75)
+                    )
             }
         }
     }
