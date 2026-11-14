@@ -149,13 +149,13 @@ struct MainWindowView: View {
                 telemetryReadoutCell(
                     label: "ORTALAMA YÜK",
                     value: "%\(store.averageUsagePercentage)",
-                    valueColor: StudioPalette.normalEnd
+                    valueColor: StudioPalette.progressiveColor(for: Double(store.averageUsagePercentage) / 100.0)
                 )
                 verticalReadoutHairline
                 telemetryReadoutCell(
                     label: "TAVAN YÜK",
                     value: "%\(store.highestUsagePercentage)",
-                    valueColor: StudioPalette.statusColor(for: highestSeverity)
+                    valueColor: StudioPalette.progressiveColor(for: Double(store.highestUsagePercentage) / 100.0)
                 )
                 verticalReadoutHairline
                 telemetryReadoutCell(
@@ -203,7 +203,7 @@ struct MainWindowView: View {
             }
 
             ForEach(store.activeSubscriptions) { sub in
-                let statusColor = StudioPalette.statusColor(for: sub.severity)
+                let statusColor = StudioPalette.progressiveColor(for: sub.usageRatio)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
                         ProviderBrandBadge(subscription: sub, size: 18)

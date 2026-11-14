@@ -17,14 +17,74 @@ extension AppThemeMode {
 /// Profesyonel masaüstü yardımcı uygulaması (iStat / Raycast / Linear tarzı) renk ve yüzey sistemi.
 enum StudioPalette {
     // Durum (Severity) Renkleri — Çiğ sistem renkleri yerine kalibre edilmiş stüdyo tonları
-    static let normalStart = Color(red: 0.06, green: 0.73, blue: 0.51)   // #10B981
-    static let normalEnd   = Color(red: 0.20, green: 0.83, blue: 0.60)   // #34D399
+    static let normalStart = Color(red: 0.06, green: 0.75, blue: 0.52)   // #0FC085
+    static let normalEnd   = Color(red: 0.18, green: 0.82, blue: 0.38)   // #2ED161
 
-    static let warningStart = Color(red: 0.96, green: 0.62, blue: 0.04)  // #F59E0B
-    static let warningEnd   = Color(red: 0.98, green: 0.75, blue: 0.14)  // #FBBF24
+    static let warningStart = Color(red: 0.96, green: 0.72, blue: 0.12)  // #F5B81F
+    static let warningEnd   = Color(red: 0.98, green: 0.45, blue: 0.10)  // #FA731A
 
-    static let criticalStart = Color(red: 0.96, green: 0.25, blue: 0.37) // #F43F5E
-    static let criticalEnd   = Color(red: 0.98, green: 0.44, blue: 0.52) // #FB7185
+    static let criticalStart = Color(red: 0.96, green: 0.24, blue: 0.34) // #F53D57
+    static let criticalEnd   = Color(red: 0.99, green: 0.14, blue: 0.30) // #FC244D
+
+    private struct RGBStop {
+        let pos: Double
+        let r: Double
+        let g: Double
+        let b: Double
+    }
+
+    private static let spectrumStops: [RGBStop] = [
+        RGBStop(pos: 0.00, r: 0.06, g: 0.75, b: 0.52), // #0FC085 Zümrüt-Mint
+        RGBStop(pos: 0.30, r: 0.18, g: 0.82, b: 0.38), // #2ED161 Canlı Yeşil
+        RGBStop(pos: 0.52, r: 0.95, g: 0.74, b: 0.13), // #F2BD21 Altın Kehribar
+        RGBStop(pos: 0.72, r: 0.98, g: 0.47, b: 0.10), // #FA781A Turuncu
+        RGBStop(pos: 0.88, r: 0.96, g: 0.24, b: 0.34), // #F53D57 Mercan Kırmızı
+        RGBStop(pos: 1.00, r: 0.99, g: 0.14, b: 0.30)  // #FC244D Kritik Kırmızı
+    ]
+
+    /// Doluluk oranına (0.0 - 1.0) göre kesintisiz (continuous) renk hesaplar.
+    static func progressiveColor(for ratio: Double) -> Color {
+        let clamped = min(max(ratio, 0.0), 1.0)
+        guard let first = spectrumStops.first, let last = spectrumStops.last else {
+            return normalEnd
+        }
+        if clamped <= first.pos {
+            return Color(red: first.r, green: first.g, blue: first.b)
+        }
+        if clamped >= last.pos {
+            return Color(red: last.r, green: last.g, blue: last.b)
+        }
+
+        for index in 0..<(spectrumStops.count - 1) {
+            let a = spectrumStops[index]
+            let b = spectrumStops[index + 1]
+            if clamped >= a.pos && clamped <= b.pos {
+                let t = (clamped - a.pos) / max(b.pos - a.pos, 0.0001)
+                let r = a.r + (b.r - a.r) * t
+                let g = a.g + (b.g - a.g) * t
+                let bl = a.b + (b.b - a.b) * t
+                return Color(red: r, green: g, blue: bl)
+            }
+        }
+        return Color(red: last.r, green: last.g, blue: last.b)
+    }
+
+    /// Çubuk ilerledikçe sol başlangıçtan mevcut doluluk noktasına kadar renk değiştiren spektrum gradyanı.
+    static func progressiveGradient(for ratio: Double) -> LinearGradient {
+        let clamped = min(max(ratio, 0.0), 1.0)
+        let effectiveEnd = max(clamped, 0.08)
+        let colors = [
+            progressiveColor(for: 0.0),
+            progressiveColor(for: effectiveEnd * 0.45),
+            progressiveColor(for: effectiveEnd * 0.80),
+            progressiveColor(for: effectiveEnd)
+        ]
+        return LinearGradient(
+            colors: colors,
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
 
     static func statusColor(for severity: UsageSeverity) -> Color {
         switch severity {
@@ -423,7 +483,7 @@ struct StudioMeterBar: View {
             let width = geometry.size.width
             let clamped = min(max(ratio, 0.0), 1.0)
             let fillWidth = clamped > 0 ? max(width * clamped, height * 0.85) : 0
-            let statusColor = StudioPalette.statusColor(for: severity)
+            let tipColor = StudioPalette.progressiveColor(for: clamped)
 
             ZStack(alignment: .leading) {
                 // Gömülü kanal (Recessed Track)
@@ -459,11 +519,11 @@ struct StudioMeterBar: View {
                         .offset(x: width * 0.90)
                 }
 
-                // Aktif Doluluk Katmanı
+                // Aktif Doluluk Katmanı (İlerledikçe renk değiştiren spektrum gradyanı)
                 if clamped > 0 {
                     ZStack(alignment: .trailing) {
                         RoundedRectangle(cornerRadius: height * 0.45, style: .continuous)
-                            .fill(StudioPalette.statusGradient(for: severity))
+                            .fill(StudioPalette.progressiveGradient(for: clamped))
                             .overlay(
                                 // Üst speküler parlama çizgisi
                                 RoundedRectangle(cornerRadius: height * 0.45, style: .continuous)
@@ -480,15 +540,15 @@ struct StudioMeterBar: View {
                         // Sağ uçtaki parlak gösterge çizgisi (Leading-edge specular cap)
                         if fillWidth > 6 {
                             RoundedRectangle(cornerRadius: 1, style: .continuous)
-                                .fill(Color.white.opacity(0.85))
+                                .fill(Color.white.opacity(0.88))
                                 .frame(width: 1.5, height: max(height - 2.5, 3))
                                 .padding(.trailing, 1.5)
                         }
                     }
                     .frame(width: min(fillWidth, width), height: height)
                     .shadow(
-                        color: statusColor.opacity(severity == .critical ? 0.42 : 0.22),
-                        radius: severity == .critical ? 5 : 3,
+                        color: tipColor.opacity(clamped >= 0.75 ? 0.40 : 0.24),
+                        radius: clamped >= 0.75 ? 5 : 3,
                         x: 0,
                         y: 0
                     )

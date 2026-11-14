@@ -19,7 +19,7 @@ struct SubscriptionProgressRow: View {
     }
 
     private var statusColor: Color {
-        StudioPalette.statusColor(for: subscription.severity)
+        StudioPalette.progressiveColor(for: subscription.usageRatio)
     }
 
     var body: some View {
@@ -230,7 +230,7 @@ struct SubscriptionProgressRow: View {
     private func subQuotaTelemetryGrid(metrics: [SubQuotaMetric], isCompact: Bool) -> some View {
         HStack(spacing: 6) {
             ForEach(Array(metrics.enumerated()), id: \.offset) { _, metric in
-                let metricColor = StudioPalette.statusColor(for: metric.severity)
+                let metricColor = StudioPalette.progressiveColor(for: metric.ratio)
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
