@@ -186,10 +186,10 @@ struct LimitDesktopWidgetEntryView: View {
     private func widgetHeader(title: String, shownCount: Int) -> some View {
         let remaining = max(entry.subscriptions.count - shownCount, 0)
         let peak = entry.subscriptions.map(\.usagePercentage).max() ?? 0
-        let peakSeverity: UsageSeverity = peak >= 90 ? .critical : (peak >= 70 ? .warning : .normal)
+        let peakColor = StudioPalette.progressiveColor(for: Double(peak) / 100.0)
 
         return HStack(spacing: 6) {
-            StudioStatusDot(color: StudioPalette.statusColor(for: peakSeverity), size: 5.5)
+            StudioStatusDot(color: peakColor, size: 5.5)
 
             Text(title)
                 .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -205,7 +205,7 @@ struct LimitDesktopWidgetEntryView: View {
             } else {
                 Text("TAVAN %\(peak)")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(StudioPalette.statusColor(for: peakSeverity))
+                    .foregroundStyle(peakColor)
             }
         }
     }

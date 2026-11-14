@@ -34,12 +34,13 @@ enum StudioPalette {
     }
 
     private static let spectrumStops: [RGBStop] = [
-        RGBStop(pos: 0.00, r: 0.06, g: 0.75, b: 0.52), // #0FC085 Zümrüt-Mint
-        RGBStop(pos: 0.30, r: 0.18, g: 0.82, b: 0.38), // #2ED161 Canlı Yeşil
-        RGBStop(pos: 0.52, r: 0.95, g: 0.74, b: 0.13), // #F2BD21 Altın Kehribar
-        RGBStop(pos: 0.72, r: 0.98, g: 0.47, b: 0.10), // #FA781A Turuncu
-        RGBStop(pos: 0.88, r: 0.96, g: 0.24, b: 0.34), // #F53D57 Mercan Kırmızı
-        RGBStop(pos: 1.00, r: 0.99, g: 0.14, b: 0.30)  // #FC244D Kritik Kırmızı
+        RGBStop(pos: 0.00, r: 0.02, g: 0.71, b: 0.83), // #06B6D4 Elektrik Camgöbeği (Cyan)
+        RGBStop(pos: 0.22, r: 0.06, g: 0.75, b: 0.52), // #0FC085 Zümrüt-Mint
+        RGBStop(pos: 0.42, r: 0.52, g: 0.80, b: 0.09), // #84CC16 Canlı Lime
+        RGBStop(pos: 0.58, r: 0.96, g: 0.72, b: 0.08), // #F5B814 Altın Kehribar
+        RGBStop(pos: 0.76, r: 0.98, g: 0.45, b: 0.09), // #FA7317 Parlak Turuncu
+        RGBStop(pos: 0.90, r: 0.96, g: 0.24, b: 0.34), // #F53D57 Mercan Kırmızı
+        RGBStop(pos: 1.00, r: 0.88, g: 0.11, b: 0.28)  // #E11D48 Kritik Kırmızı
     ]
 
     /// Doluluk oranına (0.0 - 1.0) göre kesintisiz (continuous) renk hesaplar.
@@ -69,14 +70,14 @@ enum StudioPalette {
         return Color(red: last.r, green: last.g, blue: last.b)
     }
 
-    /// Çubuk ilerledikçe sol başlangıçtan mevcut doluluk noktasına kadar renk değiştiren spektrum gradyanı.
+    /// Çubuk ilerledikçe sol başlangıçtan mevcut doluluk noktasına kadar renk değiştiren çok duraklı spektrum gradyanı.
     static func progressiveGradient(for ratio: Double) -> LinearGradient {
         let clamped = min(max(ratio, 0.0), 1.0)
-        let effectiveEnd = max(clamped, 0.08)
+        let effectiveEnd = max(clamped, 0.30)
         let colors = [
             progressiveColor(for: 0.0),
-            progressiveColor(for: effectiveEnd * 0.45),
-            progressiveColor(for: effectiveEnd * 0.80),
+            progressiveColor(for: effectiveEnd * 0.33),
+            progressiveColor(for: effectiveEnd * 0.66),
             progressiveColor(for: effectiveEnd)
         ]
         return LinearGradient(

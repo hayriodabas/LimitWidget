@@ -22,15 +22,36 @@ struct SubscriptionRepository: Sendable {
             .appendingPathComponent(fileName)
     }
 
+    static func widgetContainerFileURL(named name: String = fileName) -> URL {
+        let realHome = LocalUsageCollector.realHomeDirectoryURL()
+        return realHome
+            .appendingPathComponent(
+                "Library/Containers/com.hayriodabas.LimitWidget.Widget/Data/Library/Application Support/LimitWidget",
+                isDirectory: true
+            )
+            .appendingPathComponent(name)
+    }
+
     /// Diskten abonelik listesini okur; dosya yoksa nil döner.
     func load() throws -> [AISubscription]? {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return nil
-        }
-        let data = try Data(contentsOf: fileURL)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode([AISubscription].self, from: data)
+
+        if FileManager.default.fileExists(atPath: fileURL.path),
+           let data = try? Data(contentsOf: fileURL),
+           let items = try? decoder.decode([AISubscription].self, from: data) {
+            return items
+        }
+
+        if fileURL == Self.defaultFileURL() {
+            let fallbackURL = Self.widgetContainerFileURL()
+            if FileManager.default.fileExists(atPath: fallbackURL.path),
+               let data = try? Data(contentsOf: fallbackURL),
+               let items = try? decoder.decode([AISubscription].self, from: data) {
+                return items
+            }
+        }
+        return nil
     }
 
     /// Diskten okur; dosya yoksa, Adım 1 şablonuysa veya eski sezgisel birimlerden kalmışsa günceller.
@@ -62,6 +83,15 @@ struct SubscriptionRepository: Sendable {
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(subscriptions)
         try data.write(to: fileURL, options: .atomic)
+
+        if fileURL == Self.defaultFileURL() {
+            let widgetURL = Self.widgetContainerFileURL()
+            try? FileManager.default.createDirectory(
+                at: widgetURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? data.write(to: widgetURL, options: .atomic)
+        }
     }
 
     var themeFileURL: URL {
@@ -70,12 +100,20 @@ struct SubscriptionRepository: Sendable {
 
     /// Kayıtlı görünüm temasını (Sistem / Koyu / Açık) okur; yoksa .system döner.
     func loadThemeMode() -> AppThemeMode {
-        guard FileManager.default.fileExists(atPath: themeFileURL.path),
-              let data = try? Data(contentsOf: themeFileURL),
-              let mode = try? JSONDecoder().decode(AppThemeMode.self, from: data) else {
-            return .system
+        if FileManager.default.fileExists(atPath: themeFileURL.path),
+           let data = try? Data(contentsOf: themeFileURL),
+           let mode = try? JSONDecoder().decode(AppThemeMode.self, from: data) {
+            return mode
         }
-        return mode
+        if fileURL == Self.defaultFileURL() {
+            let fallbackThemeURL = Self.widgetContainerFileURL(named: "theme.json")
+            if FileManager.default.fileExists(atPath: fallbackThemeURL.path),
+               let data = try? Data(contentsOf: fallbackThemeURL),
+               let mode = try? JSONDecoder().decode(AppThemeMode.self, from: data) {
+                return mode
+            }
+        }
+        return .system
     }
 
     /// Seçilen görünüm temasını (Sistem / Koyu / Açık) kaydeder.
@@ -84,6 +122,15 @@ struct SubscriptionRepository: Sendable {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(mode)
         try data.write(to: themeFileURL, options: .atomic)
+
+        if fileURL == Self.defaultFileURL() {
+            let widgetThemeURL = Self.widgetContainerFileURL(named: "theme.json")
+            try? FileManager.default.createDirectory(
+                at: widgetThemeURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? data.write(to: widgetThemeURL, options: .atomic)
+        }
     }
 
     private static func isLegacyStep1Sample(_ items: [AISubscription]) -> Bool {

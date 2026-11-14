@@ -189,8 +189,8 @@ struct SubscriptionProgressRow: View {
             StudioMeterBar(
                 ratio: subscription.usageRatio,
                 severity: subscription.severity,
-                height: 6,
-                showTicks: false
+                height: 7.5,
+                showTicks: true
             )
 
             Text(subscription.compactSummaryText)
@@ -219,7 +219,7 @@ struct SubscriptionProgressRow: View {
             StudioMeterBar(
                 ratio: subscription.usageRatio,
                 severity: subscription.severity,
-                height: 5,
+                height: 6.5,
                 showTicks: false
             )
         }
