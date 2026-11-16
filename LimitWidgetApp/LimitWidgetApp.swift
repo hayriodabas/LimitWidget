@@ -2,18 +2,21 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// LimitWidget ana uygulaması: üst menü çubuğunda üzerine gelindiğinde (hover) ve tıklandığında açılan
-/// telemetri paneli ile içerik boyutuna göre otomatik uzayan stüdyo yönetim konsolu sunar.
+/// LimitWidget: menü çubuğunda yaşayan kota izleyici. Ana pencere ve Ayarlar AppKit üzerinden yönetilir;
+/// böylece Dock simgesi olmadan menü çubuğundan açılıp kapanabilir.
 @main
 struct LimitWidgetApp: App {
     @State private var store: SubscriptionStore
+    @State private var preferences: AppPreferences
     @State private var statusBarController: StatusBarController
 
     init() {
         let store = SubscriptionStore()
-        store.startAutoSync(interval: 60)
+        let preferences = AppPreferences()
+        store.startAutoSync(interval: TimeInterval(preferences.refreshInterval))
         _store = State(initialValue: store)
-        _statusBarController = State(initialValue: StatusBarController(store: store))
+        _preferences = State(initialValue: preferences)
+        _statusBarController = State(initialValue: StatusBarController(store: store, preferences: preferences))
     }
 
     var body: some Scene {
@@ -23,22 +26,28 @@ struct LimitWidgetApp: App {
     }
 }
 
-/// Üst menü çubuğundaki `%XX` göstergesini yöneten, üzerine fareyle gelindiğinde (hover)
-/// aşağı doğru tüm sağlayıcı oranlarını gösteren açılır panel denetleyicisi.
+/// Menü çubuğu simgesini, açılır paneli, ana pencereyi ve Ayarlar penceresini yönetir.
 @MainActor
 final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDelegate, NSWindowDelegate {
     private let store: SubscriptionStore
+    private let preferences: AppPreferences
+    private let notifier = UsageAlertNotifier()
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private var studioWindow: NSWindow?
+    private var settingsWindow: NSWindow?
     private var isPinnedByClick = false
     private var isPointerInButton = false
     private var isPointerInPopover = false
     private var hoverOpenTask: Task<Void, Never>?
     private var hoverCloseTask: Task<Void, Never>?
+    private var appliedRefreshInterval: Int
+    private var launchedAsLoginItem = false
 
-    init(store: SubscriptionStore) {
+    init(store: SubscriptionStore, preferences: AppPreferences) {
         self.store = store
+        self.preferences = preferences
+        self.appliedRefreshInterval = preferences.refreshInterval
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popover = NSPopover()
         super.init()
@@ -48,13 +57,38 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         configurePopover()
         configureStatusButton()
         applyThemeAppearance()
-        if let appIcon = NSImage(named: "AppIcon") {
-            NSApplication.shared.applicationIconImage = appIcon
-        }
         observeStoreChanges()
+        observePreferenceChanges()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            self?.bringMainWindowToFront()
+            // Oturum açılışında sessizce menü çubuğunda başla; elle açılışta pencereyi göster.
+            if self?.launchedAsLoginItem == false {
+                self?.bringMainWindowToFront()
+            }
+            #if DEBUG
+            self?.openDebugSurfacesIfRequested()
+            #endif
         }
+    }
+
+    #if DEBUG
+    /// Geliştirme sırasında ekran görüntüsü almak için: `-LWDebugOpen popover|settings|add`.
+    private func openDebugSurfacesIfRequested() {
+        switch UserDefaults.standard.string(forKey: "LWDebugOpen") {
+        case "popover":
+            isPinnedByClick = true
+            showPopover()
+        case "settings":
+            showSettingsWindow()
+        default:
+            break
+        }
+    }
+    #endif
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        launchedAsLoginItem = event?.eventID == AEEventID(kAEOpenApplication)
+            && event?.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == OSType(keyAELaunchedAsLogInItem)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -66,19 +100,19 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         return true
     }
 
+    // MARK: Appearance
+
     private func applyThemeAppearance() {
         let appearance: NSAppearance?
         switch store.themeMode {
-        case .system:
-            appearance = nil
-        case .dark:
-            appearance = NSAppearance(named: .darkAqua)
-        case .light:
-            appearance = NSAppearance(named: .aqua)
+        case .system: appearance = nil
+        case .dark: appearance = NSAppearance(named: .darkAqua)
+        case .light: appearance = NSAppearance(named: .aqua)
         }
         NSApp.appearance = appearance
         popover.appearance = appearance
         studioWindow?.appearance = appearance
+        settingsWindow?.appearance = appearance
     }
 
     private func configurePopover() {
@@ -94,6 +128,10 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
             onOpenMainWindow: { [weak self] in
                 self?.closePopover()
                 self?.bringMainWindowToFront()
+            },
+            onOpenSettings: { [weak self] in
+                self?.closePopover()
+                self?.showSettingsWindow()
             }
         )
         let hostingController = NSHostingController(rootView: rootView)
@@ -107,6 +145,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         button.action = #selector(handleStatusButtonClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.imagePosition = .imageLeading
+        button.setAccessibilityTitle("LimitWidget")
 
         let trackingView = StatusBarHoverTrackingView(frame: button.bounds) { [weak self] hovering in
             self?.handleButtonHover(hovering)
@@ -116,6 +155,8 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
 
         updateStatusButtonAppearance()
     }
+
+    // MARK: Observation
 
     private func observeStoreChanges() {
         withObservationTracking {
@@ -127,37 +168,71 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
                 guard let self else { return }
                 self.updateStatusButtonAppearance()
                 self.applyThemeAppearance()
+                self.notifier.evaluate(
+                    self.store.subscriptions,
+                    threshold: self.preferences.alertThreshold,
+                    isEnabled: self.preferences.notifiesNearLimit
+                )
                 self.observeStoreChanges()
             }
         }
     }
 
+    private func observePreferenceChanges() {
+        withObservationTracking {
+            _ = preferences.menuBarDisplay
+            _ = preferences.refreshInterval
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.updateStatusButtonAppearance()
+                if self.appliedRefreshInterval != self.preferences.refreshInterval {
+                    self.appliedRefreshInterval = self.preferences.refreshInterval
+                    self.store.startAutoSync(interval: TimeInterval(self.preferences.refreshInterval))
+                }
+                self.observePreferenceChanges()
+            }
+        }
+    }
+
+    // MARK: Status item
+
     private func updateStatusButtonAppearance() {
         guard let button = statusItem.button else { return }
         let peak = store.highestUsagePercentage
-        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-        button.image = NSImage(
-            systemSymbolName: "chart.bar.xaxis",
-            accessibilityDescription: "LimitWidget"
-        )?.withSymbolConfiguration(symbolConfig)
+        let hasActive = !store.activeSubscriptions.isEmpty
+        let severity = UsageTone.severity(forRatio: Double(peak) / 100)
 
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
-        button.attributedTitle = NSAttributedString(
-            string: " %\(peak)",
-            attributes: [.font: font]
-        )
+        button.image = MenuBarGaugeImage.make(ratio: hasActive ? Double(peak) / 100 : 0)
+
+        if preferences.menuBarDisplay == .peakPercent && hasActive {
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium),
+                .baselineOffset: 0.5
+            ]
+            if severity == .critical {
+                attributes[.foregroundColor] = NSColor.systemRed
+            }
+            button.attributedTitle = NSAttributedString(string: " %\(peak)", attributes: attributes)
+        } else {
+            button.attributedTitle = NSAttributedString(string: "")
+        }
 
         let summaryLines = store.activeSubscriptions.map { item in
-            "\(item.providerName): %\(item.usagePercentage) (\(item.compactSummaryText))"
+            "\(item.providerName): \(item.percentText)"
         }
-        button.toolTip = summaryLines.isEmpty
-            ? "LimitWidget Studio"
-            : summaryLines.joined(separator: "\n")
+        button.toolTip = summaryLines.isEmpty ? "LimitWidget" : summaryLines.joined(separator: "\n")
     }
 
     @objc private func handleStatusButtonClick(_ sender: Any?) {
         hoverOpenTask?.cancel()
         hoverCloseTask?.cancel()
+
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            closePopover()
+            showStatusMenu()
+            return
+        }
 
         if popover.isShown {
             if isPinnedByClick {
@@ -171,14 +246,48 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         }
     }
 
+    private func showStatusMenu() {
+        guard let button = statusItem.button else { return }
+        let menu = NSMenu()
+
+        let open = NSMenuItem(title: "LimitWidget'ı Aç", action: #selector(menuOpenMainWindow), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+
+        let refresh = NSMenuItem(title: "Şimdi Yenile", action: #selector(menuRefresh), keyEquivalent: "r")
+        refresh.target = self
+        refresh.isEnabled = !store.isSyncing
+        menu.addItem(refresh)
+
+        menu.addItem(.separator())
+
+        let settings = NSMenuItem(title: "Ayarlar…", action: #selector(menuOpenSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(title: "LimitWidget'tan Çık", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(quit)
+
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 5), in: button)
+    }
+
+    @objc private func menuOpenMainWindow() { bringMainWindowToFront() }
+    @objc private func menuOpenSettings() { showSettingsWindow() }
+    @objc private func menuRefresh() { Task { await store.syncLocalUsageAsync() } }
+
+    // MARK: Hover
+
     private func handleButtonHover(_ hovering: Bool) {
         isPointerInButton = hovering
+        guard preferences.opensOnHover else { return }
         if hovering {
             hoverCloseTask?.cancel()
             guard !popover.isShown else { return }
             hoverOpenTask?.cancel()
             hoverOpenTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(90))
+                try? await Task.sleep(for: .milliseconds(120))
                 guard !Task.isCancelled, let self, self.isPointerInButton else { return }
                 self.isPinnedByClick = false
                 self.showPopover()
@@ -202,7 +311,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         guard !isPinnedByClick else { return }
         hoverCloseTask?.cancel()
         hoverCloseTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(260))
+            try? await Task.sleep(for: .milliseconds(280))
             guard !Task.isCancelled,
                   let self,
                   !self.isPinnedByClick,
@@ -226,69 +335,86 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         }
     }
 
-    private func bringMainWindowToFront() {
+    // MARK: Windows
+
+    func bringMainWindowToFront() {
         NSApp.setActivationPolicy(.accessory)
-        if let existing = studioWindow ?? NSApp.windows.first(where: { $0.title.contains("LimitWidget") }) {
-            configureStudioWindow(existing)
+        if let existing = studioWindow {
             if existing.isMiniaturized {
                 existing.deminiaturize(nil)
             }
             existing.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            studioWindow = existing
+            NSApp.activate()
             return
         }
+
         let hosting = NSHostingController(
-            rootView: MainWindowView(store: store).frame(width: 880)
+            rootView: MainWindowView(store: store, onOpenSettings: { [weak self] in
+                self?.showSettingsWindow()
+            })
+            .background {
+                WindowBackdrop()
+                    .ignoresSafeArea()
+            }
         )
         hosting.sizingOptions = [.preferredContentSize]
+        hosting.sceneBridgingOptions = [.toolbars, .title]
+
         let window = NSWindow(contentViewController: hosting)
-        window.title = "LimitWidget Studio"
-        window.styleMask = [.titled, .closable, .miniaturizable]
-        configureStudioWindow(window)
-        window.center()
+        window.title = "LimitWidget"
+        window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
+        window.toolbarStyle = .unified
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.setFrameAutosaveName("LimitWidgetMainWindow")
+        if let minimizeButton = window.standardWindowButton(.miniaturizeButton) {
+            minimizeButton.target = self
+            minimizeButton.action = #selector(hideWindowToMenuBar(_:))
+        }
+        window.appearance = NSApp.appearance
+        if !window.setFrameUsingName("LimitWidgetMainWindow") {
+            window.center()
+        }
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         studioWindow = window
     }
 
-    private func configureStudioWindow(_ window: NSWindow) {
-        window.isReleasedWhenClosed = false
-        window.delegate = self
-        if let minimizeButton = window.standardWindowButton(.miniaturizeButton) {
-            minimizeButton.target = self
-            minimizeButton.action = #selector(hideStudioWindowToMenuBar(_:))
+    func showSettingsWindow() {
+        NSApp.setActivationPolicy(.accessory)
+        if let existing = settingsWindow {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+            return
         }
+
+        let hosting = NSHostingController(
+            rootView: SettingsView(store: store, preferences: preferences)
+        )
+        hosting.sizingOptions = [.preferredContentSize]
+
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Ayarlar"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.appearance = NSApp.appearance
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+        settingsWindow = window
     }
 
-    @objc private func hideStudioWindowToMenuBar(_ sender: Any?) {
+    @objc private func hideWindowToMenuBar(_ sender: Any?) {
         let targetWindow = (sender as? NSButton)?.window ?? studioWindow
         targetWindow?.orderOut(nil)
-        NSApp.setActivationPolicy(.accessory)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
-        NSApp.setActivationPolicy(.accessory)
         return false
-    }
-
-    func windowWillMiniaturize(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else { return }
-        DispatchQueue.main.async {
-            if window.isMiniaturized {
-                window.deminiaturize(nil)
-            }
-            window.orderOut(nil)
-            NSApp.setActivationPolicy(.accessory)
-        }
-    }
-
-    func windowDidMiniaturize(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else { return }
-        window.deminiaturize(nil)
-        window.orderOut(nil)
-        NSApp.setActivationPolicy(.accessory)
     }
 
     func popoverDidClose(_ notification: Notification) {
@@ -296,6 +422,64 @@ final class StatusBarController: NSObject, NSPopoverDelegate, NSApplicationDeleg
         isPointerInPopover = false
     }
 }
+
+// MARK: - Window backdrop
+
+/// Ana pencerenin arkasında masaüstünü buzlu camla gösteren zemin.
+private struct WindowBackdrop: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .underWindowBackground
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+// MARK: - Menu bar gauge
+
+/// Menü çubuğu için şablon (tek renk) halka göstergesi çizer; sistem rengine kendiliğinden uyar.
+enum MenuBarGaugeImage {
+    static func make(ratio: Double) -> NSImage {
+        let clamped = min(max(ratio, 0), 1)
+        let size = NSSize(width: 16, height: 16)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let lineWidth: CGFloat = 2.2
+            let inset = lineWidth / 2 + 0.75
+            let circleRect = rect.insetBy(dx: inset, dy: inset)
+            let center = NSPoint(x: circleRect.midX, y: circleRect.midY)
+            let radius = circleRect.width / 2
+
+            let track = NSBezierPath(ovalIn: circleRect)
+            track.lineWidth = lineWidth
+            NSColor.black.withAlphaComponent(0.3).setStroke()
+            track.stroke()
+
+            if clamped > 0 {
+                let arc = NSBezierPath()
+                arc.appendArc(
+                    withCenter: center,
+                    radius: radius,
+                    startAngle: 90,
+                    endAngle: 90 - 360 * clamped,
+                    clockwise: true
+                )
+                arc.lineWidth = lineWidth
+                arc.lineCapStyle = .round
+                NSColor.black.setStroke()
+                arc.stroke()
+            }
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "LimitWidget"
+        return image
+    }
+}
+
+// MARK: - Hover tracking
 
 /// Tıklamaları engellemeden (`hitTest -> nil`) menü çubuğu düğmesi üzerindeki fare giriş/çıkışlarını izler.
 private final class StatusBarHoverTrackingView: NSView {

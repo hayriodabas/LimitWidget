@@ -1,346 +1,231 @@
 import SwiftUI
 import WidgetKit
 
-/// Masaüstü WidgetKit zaman çizelgesi girdisi.
+/// Masaüstü widget zaman çizelgesi girdisi.
 struct LimitWidgetEntry: TimelineEntry {
     let date: Date
     let subscriptions: [AISubscription]
-    let themeMode: AppThemeMode
 }
 
-/// Abonelik deposundan widget zaman çizelgesi üreten sağlayıcı.
+/// Abonelik dosyasından widget zaman çizelgesi üretir.
 struct LimitTimelineProvider: TimelineProvider {
     nonisolated func placeholder(in context: Context) -> LimitWidgetEntry {
-        LimitWidgetEntry(
-            date: Date(),
-            subscriptions: AISubscription.makeDefaultSubscriptions(),
-            themeMode: .system
-        )
+        LimitWidgetEntry(date: Date(), subscriptions: Self.sampleSubscriptions())
     }
 
     nonisolated func getSnapshot(in context: Context, completion: @escaping (LimitWidgetEntry) -> Void) {
-        let repo = SubscriptionRepository()
-        let items = loadActiveSubscriptions(from: repo)
-        completion(LimitWidgetEntry(date: Date(), subscriptions: items, themeMode: repo.loadThemeMode()))
+        if context.isPreview {
+            completion(LimitWidgetEntry(date: Date(), subscriptions: Self.sampleSubscriptions()))
+            return
+        }
+        completion(LimitWidgetEntry(date: Date(), subscriptions: loadActiveSubscriptions()))
     }
 
     nonisolated func getTimeline(in context: Context, completion: @escaping (Timeline<LimitWidgetEntry>) -> Void) {
         let now = Date()
-        let repo = SubscriptionRepository()
-        let items = loadActiveSubscriptions(from: repo, now: now)
-        let entry = LimitWidgetEntry(date: now, subscriptions: items, themeMode: repo.loadThemeMode())
-        let nextRefresh = Calendar.current.date(byAdding: .minute, value: 15, to: now) ?? now.addingTimeInterval(900)
-        completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
+        let items = loadActiveSubscriptions(now: now)
+        // Geri sayımlar güncel kalsın diye önümüzdeki bir saat için 15 dakikalık girdiler üret.
+        let entries = (0..<4).map { step in
+            LimitWidgetEntry(date: now.addingTimeInterval(TimeInterval(step) * 900), subscriptions: items)
+        }
+        let nextRefresh = now.addingTimeInterval(3600)
+        completion(Timeline(entries: entries, policy: .after(nextRefresh)))
     }
 
-    nonisolated private func loadActiveSubscriptions(
-        from repo: SubscriptionRepository = SubscriptionRepository(),
-        now: Date = Date()
-    ) -> [AISubscription] {
-        repo
+    nonisolated private func loadActiveSubscriptions(now: Date = Date()) -> [AISubscription] {
+        SubscriptionRepository()
             .loadOrSeed(now: now)
             .filter(\.isEnabled)
             .sorted { $0.sortOrder < $1.sortOrder }
     }
+
+    /// Widget galerisinde gösterilen örnek değerler.
+    nonisolated static func sampleSubscriptions(now: Date = Date()) -> [AISubscription] {
+        let samples: [(Double, String, TimeInterval)] = [
+            (53, "5sa: %12 • Haftalık: %53", 2 * 86_400 + 4 * 3600),
+            (34, "Gemini: %34 • Claude/GPT: %18", 3 * 3600 + 20 * 60),
+            (86, "5sa: %41 • Haftalık: %86 (Plus)", 26 * 3600),
+            (22, "5sa: %3 • Hft: %9 • Ay: %22", 12 * 86_400)
+        ]
+        return AISubscription.makeDefaultSubscriptions(now: now).enumerated().map { index, item in
+            var copy = item
+            copy.usedAmount = samples[index].0
+            copy.subtitle = samples[index].1
+            copy.resetsAt = now.addingTimeInterval(samples[index].2)
+            return copy
+        }
+    }
 }
 
-/// Masaüstü widget görünümü; küçük, orta ve büyük boyutlara stüdyo estetiğiyle uyum sağlar.
+/// Masaüstü widget görünümü: Pil widget'ı düzeninde halkalar ve satırlar.
 struct LimitDesktopWidgetEntryView: View {
     @Environment(\.widgetFamily) private var family
-    @Environment(\.colorScheme) private var systemColorScheme
     let entry: LimitWidgetEntry
-
-    private var colorScheme: ColorScheme {
-        entry.themeMode.preferredColorScheme ?? systemColorScheme
-    }
 
     var body: some View {
         Group {
-            switch family {
-            case .systemSmall:
-                smallLayout
-            case .systemMedium:
-                mediumLayout
-            case .systemLarge:
-                largeLayout
-            default:
-                mediumLayout
-            }
-        }
-        .environment(\.colorScheme, colorScheme)
-        .containerBackground(for: .widget) {
-            glassWidgetCanvas
-        }
-    }
-
-    /// Google Liquid Glass / Buzlu Prizmatik Cam arka plan katmanı.
-    private var glassWidgetCanvas: some View {
-        ZStack {
-            // Masaüstü duvar kağıdını flulaştıran yarı saydam buzlu cam tabanı
-            Rectangle()
-                .fill(.ultraThinMaterial)
-
-            // Kontrast ve derinlik için çok hafif cam tonu
-            Rectangle()
-                .fill(
-                    colorScheme == .dark
-                        ? Color(red: 0.05, green: 0.07, blue: 0.13).opacity(0.32)
-                        : Color.white.opacity(0.24)
-                )
-
-            // Sol-üst Google Aura camgöbeği/mavi ışık kırılması
-            RadialGradient(
-                colors: [
-                    Color(red: 0.12, green: 0.76, blue: 0.96).opacity(colorScheme == .dark ? 0.22 : 0.18),
-                    Color.clear
-                ],
-                center: .topLeading,
-                startRadius: 8,
-                endRadius: 210
-            )
-
-            // Sağ-alt prizmatik indigo/zümrüt ışık yansıması
-            RadialGradient(
-                colors: [
-                    Color(red: 0.42, green: 0.38, blue: 0.98).opacity(colorScheme == .dark ? 0.20 : 0.14),
-                    Color(red: 0.06, green: 0.75, blue: 0.52).opacity(colorScheme == .dark ? 0.10 : 0.08),
-                    Color.clear
-                ],
-                center: .bottomTrailing,
-                startRadius: 10,
-                endRadius: 230
-            )
-
-            // Diyagonal cam yüzey parlaması (Specular Glass Sheen)
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(colorScheme == .dark ? 0.18 : 0.52),
-                    Color.white.opacity(colorScheme == .dark ? 0.03 : 0.12),
-                    Color.white.opacity(colorScheme == .dark ? 0.08 : 0.26)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            // Dış çerçeve prizmatik cam kenarlığı
-            ContainerRelativeShape()
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(colorScheme == .dark ? 0.42 : 0.85),
-                            Color(red: 0.35, green: 0.82, blue: 0.98).opacity(0.28),
-                            Color.white.opacity(colorScheme == .dark ? 0.08 : 0.25)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.1
-                )
-        }
-    }
-
-    /// Her sağlayıcı satırını yarı şeffaf, ışığı kıran 3B cam kapsül içinde sarmalar.
-    private func glassCard<Content: View>(
-        for subscription: AISubscription,
-        cornerRadius: CGFloat,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        let brand = ProviderBrand.resolve(for: subscription)
-        let tipColor = StudioPalette.progressiveColor(for: subscription.usageRatio)
-
-        return content()
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(colorScheme == .dark ? 0.14 : 0.62),
-                                    Color.white.opacity(colorScheme == .dark ? 0.05 : 0.30)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-
-                    // Sağlayıcı renginde hafif iç cam kırılması
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    brand.primary.opacity(colorScheme == .dark ? 0.12 : 0.09),
-                                    tipColor.opacity(colorScheme == .dark ? 0.08 : 0.06),
-                                    Color.clear
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                }
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(colorScheme == .dark ? 0.38 : 0.82),
-                                brand.secondary.opacity(colorScheme == .dark ? 0.30 : 0.25),
-                                Color.white.opacity(colorScheme == .dark ? 0.07 : 0.24)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.9
-                    )
-            )
-            .shadow(
-                color: Color.black.opacity(colorScheme == .dark ? 0.20 : 0.06),
-                radius: 5,
-                x: 0,
-                y: 2
-            )
-    }
-
-    private var smallLayout: some View {
-        let items = Array(entry.subscriptions.prefix(3))
-        return VStack(alignment: .leading, spacing: 7) {
-            widgetHeader(title: "LIMITWIDGET", shownCount: items.count)
-
-            if items.isEmpty {
+            if entry.subscriptions.isEmpty {
                 emptyState
             } else {
-                ForEach(items) { subscription in
-                    glassCard(for: subscription, cornerRadius: 9) {
-                        SubscriptionProgressRow(subscription: subscription, style: .widgetSmall)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 5)
-                    }
+                switch family {
+                case .systemSmall:
+                    SmallRingsLayout(items: Array(entry.subscriptions.prefix(4)))
+                case .systemLarge:
+                    LargeListLayout(entry: entry)
+                default:
+                    MediumRingsLayout(items: Array(entry.subscriptions.prefix(4)))
                 }
             }
-
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var mediumLayout: some View {
-        let items = Array(entry.subscriptions.prefix(4))
-        let columns = [
-            GridItem(.flexible(), spacing: 8),
-            GridItem(.flexible(), spacing: 8)
-        ]
-
-        return VStack(alignment: .leading, spacing: 8) {
-            widgetHeader(title: "LIMITWIDGET TELEMETRİ", shownCount: items.count)
-
-            if items.isEmpty {
-                emptyState
-            } else {
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(items) { subscription in
-                        glassCard(for: subscription, cornerRadius: 10) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                SubscriptionProgressRow(subscription: subscription, style: .widgetSmall)
-
-                                HStack(spacing: 4) {
-                                    Text(subscription.compactSummaryText)
-                                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-
-                                    Spacer(minLength: 2)
-
-                                    Text(subscription.formattedResetCountdown())
-                                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                        }
-                    }
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var largeLayout: some View {
-        let items = Array(entry.subscriptions.prefix(4))
-        return VStack(alignment: .leading, spacing: 8) {
-            widgetHeader(title: "LIMITWIDGET TELEMETRİ", shownCount: items.count)
-
-            if items.isEmpty {
-                emptyState
-            } else {
-                VStack(spacing: 7) {
-                    ForEach(items) { subscription in
-                        glassCard(for: subscription, cornerRadius: 11) {
-                            SubscriptionProgressRow(subscription: subscription, style: .widgetRegular)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                        }
-                    }
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func widgetHeader(title: String, shownCount: Int) -> some View {
-        let remaining = max(entry.subscriptions.count - shownCount, 0)
-        let peak = entry.subscriptions.map(\.usagePercentage).max() ?? 0
-        let peakColor = StudioPalette.progressiveColor(for: Double(peak) / 100.0)
-
-        return HStack(spacing: 6) {
-            StudioStatusDot(color: peakColor, size: 6)
-
-            Text(title)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .kerning(0.8)
-                .lineLimit(1)
-
-            Spacer(minLength: 4)
-
-            if remaining > 0 {
-                Text("+\(remaining)")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("TAVAN %\(peak)")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(peakColor)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.45))
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.25 : 0.65), lineWidth: 0.75)
-                    )
-            }
-        }
+        .containerBackground(.background, for: .widget)
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Aktif sağlayıcı yok")
-                .font(.system(size: 11, weight: .semibold))
-            Text("LimitWidget üzerinden yapılandırın.")
-                .font(.system(size: 9.5))
+        VStack(spacing: 6) {
+            Image(systemName: "gauge.with.dots.needle.33percent")
+                .font(.system(size: 22))
+                .foregroundStyle(.secondary)
+            Text("Sağlayıcı yok")
+                .font(.system(size: 12, weight: .semibold))
+            Text("LimitWidget'tan ekleyin")
+                .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-/// macOS Masaüstü WidgetKit giriş noktası.
+// MARK: - Ring cell
+
+/// Ortasında sağlayıcı işareti olan kullanım halkası.
+private struct ProviderRingCell: View {
+    let subscription: AISubscription
+    var lineWidth: CGFloat = 5.5
+    var showsName: Bool = false
+
+    var body: some View {
+        let brand = ProviderBrand.resolve(for: subscription)
+        VStack(spacing: 5) {
+            UsageRing(ratio: subscription.usageRatio, lineWidth: lineWidth) {
+                GeometryReader { proxy in
+                    ProviderGlyph(key: subscription.effectiveProviderKey, fallbackSymbol: subscription.iconName)
+                        .foregroundStyle(brand.glyphStyle)
+                        .frame(width: proxy.size.width * 0.42, height: proxy.size.width * 0.42)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+
+            Text(subscription.percentText)
+                .numericStyle(size: 12.5)
+                .foregroundStyle(.primary)
+
+            if showsName {
+                Text(subscription.providerName)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(subscription.providerName) \(subscription.percentText)")
+    }
+}
+
+// MARK: - Small
+
+private struct SmallRingsLayout: View {
+    let items: [AISubscription]
+
+    var body: some View {
+        if items.count == 1, let item = items.first {
+            VStack(spacing: 8) {
+                ProviderRingCell(subscription: item, lineWidth: 9)
+                    .frame(maxHeight: .infinity)
+                Text(item.resetPhrase().map { "\($0) sonra yenilenir" } ?? item.providerName)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        } else {
+            GeometryReader { proxy in
+                // İki satır halka + yüzde etiketi kutuya sığacak şekilde halka çapını hesapla.
+                let labelHeight: CGFloat = 20
+                let rowSpacing: CGFloat = 8
+                let byHeight = (proxy.size.height - rowSpacing - labelHeight * 2) / 2
+                let byWidth = (proxy.size.width - 16) / 2
+                let ring = max(min(byHeight, byWidth), 24)
+                let columns = [
+                    GridItem(.fixed(ring), spacing: 16),
+                    GridItem(.fixed(ring), spacing: 16)
+                ]
+                LazyVGrid(columns: columns, spacing: rowSpacing) {
+                    ForEach(items) { item in
+                        ProviderRingCell(subscription: item, lineWidth: 4.5)
+                            .frame(width: ring)
+                    }
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+        }
+    }
+}
+
+// MARK: - Medium
+
+private struct MediumRingsLayout: View {
+    let items: [AISubscription]
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            ForEach(items) { item in
+                ProviderRingCell(subscription: item, lineWidth: 6, showsName: true)
+                    .frame(maxWidth: 72)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Large
+
+private struct LargeListLayout: View {
+    let entry: LimitWidgetEntry
+
+    var body: some View {
+        let items = Array(entry.subscriptions.prefix(5))
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("LimitWidget")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                if let peak = entry.subscriptions.max(by: { $0.usageRatio < $1.usageRatio }) {
+                    Text("En yüksek \(peak.percentText)")
+                        .numericStyle(size: 11.5, weight: .medium)
+                        .foregroundStyle(UsageTone.color(for: peak.severity))
+                }
+            }
+            .padding(.bottom, 12)
+
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    ProviderSummaryRow(subscription: item, iconSize: 30, now: entry.date)
+                        .padding(.vertical, 11)
+                    if index < items.count - 1 {
+                        Divider()
+                            .padding(.leading, 41)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// macOS masaüstü widget'ı.
 @main
 struct LimitDesktopWidget: Widget {
     let kind: String = "LimitDesktopWidget"
@@ -349,8 +234,8 @@ struct LimitDesktopWidget: Widget {
         StaticConfiguration(kind: kind, provider: LimitTimelineProvider()) { entry in
             LimitDesktopWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("LimitWidget Studio")
-        .description("Yapay zeka abonelik kotalarını hassas enstrüman çubuklarıyla masaüstünde izleyin.")
+        .configurationDisplayName("Kotalar")
+        .description("Yapay zekâ aboneliklerinizin kalan kotasını bir bakışta görün.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

@@ -435,3 +435,141 @@ extension AISubscription {
         ]
     }
 }
+
+// MARK: - Presentation helpers
+
+/// Arayüzde gösterilen, okunabilir etiketli alt kota değeri.
+struct DisplayMetric: Identifiable, Equatable, Sendable {
+    let id: Int
+    let label: String
+    let percentage: Int
+    let isPrimary: Bool
+
+    var ratio: Double {
+        min(max(Double(percentage) / 100.0, 0.0), 1.0)
+    }
+}
+
+extension AISubscription {
+    /// Özel kayıtlar için addan çıkarılan, aksi halde kayıtlı sağlayıcı anahtarı.
+    var effectiveProviderKey: String {
+        providerKey == LocalProviderKey.custom.rawValue
+            ? Self.inferProviderKey(from: providerName)
+            : providerKey
+    }
+
+    /// Türkçe yüzde yazımı: "%53".
+    static func percentText(_ value: Int) -> String {
+        "%\(value)"
+    }
+
+    var percentText: String {
+        Self.percentText(usagePercentage)
+    }
+
+    /// Alt kotaları okunur etiketlerle döndürür ("5sa" → "5 saat", "Hft" → "Haftalık").
+    var displayMetrics: [DisplayMetric] {
+        subQuotaMetrics.enumerated().map { index, metric in
+            DisplayMetric(
+                id: index,
+                label: Self.friendlyMetricLabel(metric.label),
+                percentage: metric.percentage,
+                isPrimary: Self.metricLabel(metric.label, matches: windowType)
+            )
+        }
+    }
+
+    /// Alt kotaların tek satırlık özeti: "5 saat %0 · Haftalık %53".
+    var metricsSummary: String? {
+        let metrics = displayMetrics
+        guard !metrics.isEmpty else { return nil }
+        return metrics
+            .map { "\($0.label) \(Self.percentText($0.percentage))" }
+            .joined(separator: " · ")
+    }
+
+    /// Alt başlığın sonundaki parantez içi not: "(Plus)" → "Plus".
+    var detailNote: String? {
+        let trimmed = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(")"),
+              let open = trimmed.lastIndex(of: "(") else {
+            return nil
+        }
+        let inner = trimmed[trimmed.index(after: open)..<trimmed.index(before: trimmed.endIndex)]
+        let note = inner.trimmingCharacters(in: .whitespaces)
+        guard !note.isEmpty else { return nil }
+        if note == "Önbellek" { return "Önbellekten" }
+        return note
+    }
+
+    /// Sağlayıcı adının altında gösterilen kısa açıklama.
+    var secondaryLine: String {
+        if !subQuotaMetrics.isEmpty {
+            let base = quotaKindLabel
+            if let note = detailNote {
+                return "\(base) · \(note)"
+            }
+            return base
+        }
+        let trimmed = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return quotaKindLabel
+        }
+        return trimmed.replacingOccurrences(of: " • ", with: " · ")
+    }
+
+    /// Yenilenmeye kalan süre ("2 sa 14 dk", "3 g 4 sa"); bilinmiyorsa nil.
+    func resetPhrase(relativeTo now: Date = Date()) -> String? {
+        guard let resetsAt else { return nil }
+        let interval = resetsAt.timeIntervalSince(now)
+        guard interval > 0 else { return "şimdi" }
+        let totalMinutes = max(Int(interval / 60), 1)
+        let days = totalMinutes / (60 * 24)
+        let hours = (totalMinutes % (60 * 24)) / 60
+        let minutes = totalMinutes % 60
+        if days > 0 {
+            return hours > 0 ? "\(days) g \(hours) sa" : "\(days) g"
+        }
+        if hours > 0 {
+            return minutes > 0 ? "\(hours) sa \(minutes) dk" : "\(hours) sa"
+        }
+        return "\(minutes) dk"
+    }
+
+    /// "2 sa 14 dk sonra yenilenir" gibi tam cümle; yenilenme zamanı bilinmiyorsa nil.
+    func resetSentence(relativeTo now: Date = Date()) -> String? {
+        guard let phrase = resetPhrase(relativeTo: now) else { return nil }
+        return phrase == "şimdi" ? "Yenilendi" : "\(phrase) sonra yenilenir"
+    }
+
+    /// Cümle içinde kullanılacak dönem adı: "Haftalık kota", "5 saatlik kota".
+    var quotaKindLabel: String {
+        let lower = windowType.displayName.lowercased(with: Locale(identifier: "tr_TR"))
+        guard let first = lower.first else { return "Kota" }
+        return String(first).uppercased(with: Locale(identifier: "tr_TR")) + lower.dropFirst() + " kota"
+    }
+
+    var sourceLabel: String {
+        dataSource == .localAuto ? "Otomatik" : "Manuel"
+    }
+
+    static func friendlyMetricLabel(_ raw: String) -> String {
+        switch raw.lowercased() {
+        case "5sa": return "5 saat"
+        case "hft", "haftalık": return "Haftalık"
+        case "ay", "aylık": return "Aylık"
+        case "gün", "günlük": return "Günlük"
+        default: return raw
+        }
+    }
+
+    static func metricLabel(_ raw: String, matches window: SubscriptionWindowType) -> Bool {
+        switch (raw.lowercased(), window) {
+        case ("5sa", .fiveHour): return true
+        case ("hft", .weekly), ("haftalık", .weekly): return true
+        case ("ay", .monthly), ("aylık", .monthly): return true
+        case ("gün", .daily), ("günlük", .daily): return true
+        default: return false
+        }
+    }
+}

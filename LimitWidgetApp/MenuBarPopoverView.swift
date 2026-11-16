@@ -1,317 +1,201 @@
 import AppKit
 import SwiftUI
 
-/// Menü çubuğuna tıklandığında veya üzerine gelindiğinde açılan stüdyo sınıfı telemetri paneli.
+/// Menü çubuğu simgesinden açılan panel. Arka planı sistemin cam paneline bırakır.
 struct MenuBarPopoverView: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.openWindow) private var openWindow
     @Bindable var store: SubscriptionStore
     var onPopoverHoverChange: ((Bool) -> Void)? = nil
     var onOpenMainWindow: (() -> Void)? = nil
-    @State private var sortByUsage = false
+    var onOpenSettings: (() -> Void)? = nil
+
     @State private var hoveredID: UUID?
 
-    private var displayedSubscriptions: [AISubscription] {
-        let items = store.activeSubscriptions
-        if sortByUsage {
-            return items.sorted { $0.usageRatio > $1.usageRatio }
-        }
-        return items
-    }
-
-    private var highestSeverity: UsageSeverity {
-        if store.criticalCount > 0 { return .critical }
-        if store.warningCount > 0 { return .warning }
-        return .normal
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            studioHeader
-            hairlineDivider
-            contentArea
-            hairlineDivider
-            studioFooter
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            VStack(spacing: 0) {
+                header(now: context.date)
+
+                if store.activeSubscriptions.isEmpty {
+                    emptyState
+                } else {
+                    VStack(spacing: 2) {
+                        ForEach(store.activeSubscriptions) { subscription in
+                            row(for: subscription, now: context.date)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+
+                Divider()
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
+                footer
+            }
         }
-        .frame(width: 392)
+        .frame(width: 340)
         .fixedSize(horizontal: false, vertical: true)
-        .background(StudioPalette.windowCanvas(for: colorScheme))
         .preferredColorScheme(store.themeMode.preferredColorScheme)
         .onHover { hovering in
             onPopoverHoverChange?(hovering)
         }
     }
 
-    // MARK: - Header
+    // MARK: Header
 
-    private var studioHeader: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                StudioPalette.statusColor(for: highestSeverity).opacity(0.22),
-                                StudioPalette.statusColor(for: highestSeverity).opacity(0.06)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(
-                                StudioPalette.statusColor(for: highestSeverity).opacity(0.40),
-                                lineWidth: 1
-                            )
-                    )
-
-                Image(systemName: "slider.horizontal.below.square.and.square.filled")
+    private func header(now: Date) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("LimitWidget")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(StudioPalette.statusColor(for: highestSeverity))
-            }
-            .frame(width: 30, height: 30)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text("LIMITWIDGET")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .kerning(0.9)
-                        .foregroundStyle(.primary)
-
-                    StudioTagPill(
-                        text: store.isSyncing ? "ÖLÇÜLÜYOR" : "CANLI",
-                        accent: StudioPalette.statusColor(for: highestSeverity)
-                    )
-                }
-
-                Text("\(store.activeSubscriptions.count) aktif sağlayıcı • Ortalama %\(store.averageUsagePercentage) • Tavan %\(store.highestUsagePercentage)")
-                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                Text(updatedText(now: now))
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
             }
-
-            Spacer(minLength: 6)
-
-            HStack(spacing: 5) {
-                studioIconButton(
-                    symbol: store.themeMode.iconName,
-                    isActive: store.themeMode != .system,
-                    tooltip: "Tema: \(store.themeMode.displayName) (Değiştirmek için tıkla)"
-                ) {
-                    withAnimation(.snappy(duration: 0.2)) {
-                        store.cycleThemeMode()
-                    }
-                }
-
-                studioIconButton(
-                    symbol: sortByUsage ? "arrow.up.arrow.down.circle.fill" : "arrow.up.arrow.down",
-                    isActive: sortByUsage,
-                    tooltip: sortByUsage ? "Özel sıraya dön" : "Doluluğa göre sırala"
-                ) {
-                    withAnimation(.snappy(duration: 0.2)) {
-                        sortByUsage.toggle()
-                    }
-                }
-
-                Button {
-                    Task { await store.syncLocalUsageAsync() }
-                } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(StudioPalette.recessedWell(for: colorScheme))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .strokeBorder(
-                                        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.07),
-                                        lineWidth: 0.75
-                                    )
-                            )
-
-                        if store.isSyncing {
-                            ProgressView()
-                                .controlSize(.mini)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 11.5, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(width: 26, height: 26)
-                }
-                .buttonStyle(.plain)
-                .disabled(store.isSyncing)
-                .keyboardShortcut("r", modifiers: .command)
-                .help("Canlı kotaları şimdi yenile (⌘R)")
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(StudioPalette.elevatedHeader(for: colorScheme))
-    }
-
-    // MARK: - Content
-
-    @ViewBuilder
-    private var contentArea: some View {
-        if displayedSubscriptions.isEmpty {
-            VStack(spacing: 10) {
-                Image(systemName: "waveform.path.ecg.rectangle")
-                    .font(.system(size: 24, weight: .light))
-                    .foregroundStyle(.secondary)
-
-                Text("Aktif sağlayıcı bulunmuyor")
-                    .font(.system(size: 12.5, weight: .semibold))
-
-                Button {
-                    openMainWindow()
-                } label: {
-                    Text("Sağlayıcı Yapılandır")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 34)
-        } else {
-            VStack(spacing: 8) {
-                ForEach(displayedSubscriptions) { subscription in
-                    let isHovered = hoveredID == subscription.id
-                    let brand = ProviderBrand.resolve(for: subscription)
-
-                    SubscriptionProgressRow(subscription: subscription, style: .compact)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 9)
-                        .background(
-                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .fill(StudioPalette.cardFill(for: colorScheme, isHovered: isHovered))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .strokeBorder(
-                                    StudioPalette.cardBorder(
-                                        for: colorScheme,
-                                        accent: brand.primary,
-                                        isHovered: isHovered
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
-                        .onHover { hovering in
-                            withAnimation(.easeOut(duration: 0.14)) {
-                                hoveredID = hovering ? subscription.id : nil
-                            }
-                        }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    // MARK: - Footer
-
-    private var studioFooter: some View {
-        HStack(spacing: 8) {
-            StudioStatusDot(
-                color: store.isSyncing ? StudioPalette.warningEnd : StudioPalette.normalEnd,
-                size: 5
-            )
-
-            Text("SENKRON \(store.lastRefreshedAt.formatted(date: .omitted, time: .shortened))")
-                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                .kerning(0.4)
-                .foregroundStyle(.secondary)
 
             Spacer()
 
             Button {
-                openMainWindow()
+                Task { await store.syncLocalUsageAsync() }
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("Stüdyo Paneli")
-                        .font(.system(size: 11, weight: .semibold))
+                Group {
+                    if store.isSyncing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
                 }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(StudioPalette.recessedWell(for: colorScheme))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(
-                            colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08),
-                            lineWidth: 0.75
-                        )
-                )
+                .frame(width: 20, height: 20)
             }
-            .buttonStyle(.plain)
-
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Image(systemName: "power")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(StudioPalette.recessedWell(for: colorScheme))
-                    )
-            }
-            .buttonStyle(.plain)
-            .help("LimitWidget'tan Çık")
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .disabled(store.isSyncing)
+            .keyboardShortcut("r", modifiers: .command)
+            .help("Kotaları şimdi yenile (⌘R)")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .background(StudioPalette.elevatedHeader(for: colorScheme))
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
-    private var hairlineDivider: some View {
-        Rectangle()
-            .fill(colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.07))
-            .frame(height: 1)
+    private func updatedText(now: Date) -> String {
+        if store.isSyncing { return "Kotalar okunuyor…" }
+        let seconds = now.timeIntervalSince(store.lastRefreshedAt)
+        if seconds < 60 { return "Az önce güncellendi" }
+        let minutes = Int(seconds / 60)
+        if minutes < 60 { return "\(minutes) dk önce güncellendi" }
+        return "\(store.lastRefreshedAt.formatted(date: .omitted, time: .shortened)) itibarıyla"
     }
 
-    private func studioIconButton(
-        symbol: String,
-        isActive: Bool,
-        tooltip: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(isActive ? Color.accentColor : .secondary)
-                .frame(width: 26, height: 26)
+    // MARK: Rows
+
+    private func row(for subscription: AISubscription, now: Date) -> some View {
+        let isHovered = hoveredID == subscription.id
+        return Button {
+            onOpenMainWindow?()
+        } label: {
+            ProviderSummaryRow(subscription: subscription, now: now)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
                 .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(StudioPalette.recessedWell(for: colorScheme))
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(isHovered ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear))
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(
-                            isActive
-                                ? Color.accentColor.opacity(0.45)
-                                : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.07)),
-                            lineWidth: 0.75
-                        )
-                )
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
-        .help(tooltip)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                hoveredID = hovering ? subscription.id : (hoveredID == subscription.id ? nil : hoveredID)
+            }
+        }
     }
 
-    private func openMainWindow() {
-        onOpenMainWindow?()
-        openWindow(id: "main")
-        NSApp.activate(ignoringOtherApps: true)
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "gauge.with.dots.needle.33percent")
+                .font(.system(size: 26, weight: .regular))
+                .foregroundStyle(.secondary)
+            Text("Takip edilen sağlayıcı yok")
+                .font(.system(size: 13, weight: .semibold))
+            Text("Ana pencereden bir sağlayıcı ekleyin.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Button("LimitWidget'ı Aç") {
+                onOpenMainWindow?()
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.small)
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack(spacing: 2) {
+            footerButton("LimitWidget'ı Aç", systemImage: "macwindow") {
+                onOpenMainWindow?()
+            }
+
+            Spacer()
+
+            footerButton(nil, systemImage: "gearshape", help: "Ayarlar") {
+                onOpenSettings?()
+            }
+
+            footerButton(nil, systemImage: "power", help: "LimitWidget'tan çık") {
+                NSApplication.shared.terminate(nil)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+
+    private func footerButton(
+        _ title: String?,
+        systemImage: String,
+        help: String? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        FooterButton(title: title, systemImage: systemImage, action: action)
+            .help(help ?? title ?? "")
+    }
+}
+
+/// Menü öğesi gibi üzerine gelince hafifçe vurgulanan alt çubuk düğmesi.
+private struct FooterButton: View {
+    let title: String?
+    let systemImage: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(width: 16)
+                if let title {
+                    Text(title)
+                        .font(.system(size: 12.5))
+                }
+            }
+            .foregroundStyle(isHovered ? .primary : .secondary)
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isHovered ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }

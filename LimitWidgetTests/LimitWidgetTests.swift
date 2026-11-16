@@ -624,6 +624,63 @@ final class LimitWidgetTests: XCTestCase {
         XCTAssertEqual(repo.loadThemeMode(), .system)
     }
 
+    func testPresentationHelpers() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let codex = AISubscription(
+            providerKey: LocalProviderKey.codex.rawValue,
+            providerName: "Codex",
+            subtitle: "5sa: %41 • Haftalık: %86 (Plus)",
+            windowType: .weekly,
+            usedAmount: 86,
+            totalLimit: 100,
+            resetsAt: now.addingTimeInterval(26 * 3600 + 5 * 60)
+        )
+        XCTAssertEqual(codex.percentText, "%86")
+        XCTAssertEqual(codex.detailNote, "Plus")
+        XCTAssertEqual(codex.secondaryLine, "Haftalık kota · Plus")
+        XCTAssertEqual(codex.metricsSummary, "5 saat %41 · Haftalık %86")
+        XCTAssertEqual(codex.displayMetrics.map(\.isPrimary), [false, true])
+        XCTAssertEqual(codex.resetPhrase(relativeTo: now), "1 g 2 sa")
+        XCTAssertEqual(codex.resetSentence(relativeTo: now), "1 g 2 sa sonra yenilenir")
+
+        let fiveHour = AISubscription(providerName: "Antigravity", windowType: .fiveHour, usedAmount: 0, totalLimit: 100)
+        XCTAssertEqual(fiveHour.quotaKindLabel, "5 saatlik kota")
+        XCTAssertNil(fiveHour.resetSentence(relativeTo: now))
+
+        let cached = AISubscription(providerName: "Claude Code", subtitle: "5sa: %0 • Haftalık: %53 (Önbellek)", usedAmount: 53, totalLimit: 100)
+        XCTAssertEqual(cached.detailNote, "Önbellekten")
+
+        let manual = AISubscription(providerName: "Cursor", subtitle: "Pro Plan • 500 istek", usedAmount: 10, totalLimit: 100)
+        XCTAssertEqual(manual.secondaryLine, "Pro Plan · 500 istek")
+        XCTAssertNil(manual.metricsSummary)
+    }
+
+    @MainActor
+    func testStoreReorderAndVisibility() throws {
+        let tempDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let repo = SubscriptionRepository(fileURL: tempDir.appendingPathComponent("subscriptions.json"))
+        let emptyHome = tempDir.appendingPathComponent("home", isDirectory: true)
+        try FileManager.default.createDirectory(at: emptyHome, withIntermediateDirectories: true)
+        let store = SubscriptionStore(
+            repository: repo,
+            collector: LocalUsageCollector(homeDirectoryURL: emptyHome),
+            onDidPersist: {}
+        )
+
+        let first = store.orderedSubscriptions[0]
+        XCTAssertFalse(store.canMove(id: first.id, by: -1))
+        XCTAssertTrue(store.canMove(id: first.id, by: 1))
+
+        store.move(id: first.id, by: 1)
+        XCTAssertEqual(store.orderedSubscriptions[1].id, first.id)
+        XCTAssertEqual(try repo.load()?.sorted { $0.sortOrder < $1.sortOrder }[1].id, first.id)
+
+        store.setEnabled(false, id: first.id)
+        XCTAssertFalse(store.activeSubscriptions.contains { $0.id == first.id })
+        XCTAssertEqual(store.subscriptions.count, 4)
+    }
+
     private func makeTempDir() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("LimitWidgetTests-\(UUID().uuidString)", isDirectory: true)

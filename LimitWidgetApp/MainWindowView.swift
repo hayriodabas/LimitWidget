@@ -1,67 +1,71 @@
 import SwiftUI
 
-/// Tüm aboneliklerin yönetildiği ve detaylı stüdyo telemetri kartlarının gösterildiği ana pencere.
+/// Ana pencere: özet kartı ve sağlayıcı listesi. Araç çubuğu düğmeleri sistemin cam araç çubuğunda görünür.
 struct MainWindowView: View {
-    enum FilterOption: String, CaseIterable, Identifiable {
-        case all = "Tümü"
-        case attention = "Yüksek (%70+)"
+    enum SortMode: String, CaseIterable, Identifiable {
+        case custom
+        case usage
 
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .custom: return "Kendi sıram"
+            case .usage: return "Kullanıma göre"
+            }
+        }
     }
 
-    enum SortOption: String, CaseIterable, Identifiable {
-        case custom = "Özel Sıra"
-        case usageDescending = "Yüke Göre"
-
-        var id: String { rawValue }
-    }
-
-    @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: SubscriptionStore
-    @State private var filterOption: FilterOption = .all
-    @State private var sortOption: SortOption = .custom
+    var onOpenSettings: () -> Void = {}
+
+    @State private var sortMode: SortMode = .custom
+    @State private var showsOnlyAttention = false
     @State private var editingSubscription: AISubscription?
     @State private var isAddingNew = false
-    @State private var showResetConfirmation = false
-    @State private var hoveredCardID: UUID?
-    @State private var isHoveringReadoutDeck = false
+    @State private var pendingDeletion: AISubscription?
 
-    private var filteredSubscriptions: [AISubscription] {
-        let base: [AISubscription]
-        switch filterOption {
-        case .all:
-            base = store.subscriptions
-        case .attention:
-            base = store.subscriptions.filter { $0.usageRatio >= 0.70 }
+    private var visibleSubscriptions: [AISubscription] {
+        var items = store.orderedSubscriptions
+        if showsOnlyAttention {
+            items = items.filter { $0.usageRatio >= 0.70 }
         }
-
-        switch sortOption {
-        case .custom:
-            return base.sorted { $0.sortOrder < $1.sortOrder }
-        case .usageDescending:
-            return base.sorted { $0.usageRatio > $1.usageRatio }
+        if sortMode == .usage {
+            items.sort { $0.usageRatio > $1.usageRatio }
         }
-    }
-
-    private var highestSeverity: UsageSeverity {
-        if store.criticalCount > 0 { return .critical }
-        if store.warningCount > 0 { return .warning }
-        return .normal
+        return items
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            studioTelemetryHeader
-            hairlineDivider
-            studioControlBar
-            hairlineDivider
-            subscriptionList
-            hairlineDivider
-            studioStatusFooter
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            VStack(alignment: .leading, spacing: 24) {
+                OverviewCard(store: store, now: context.date)
+
+                providersSection(now: context.date)
+
+                if let message = store.lastErrorMessage {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .symbolRenderingMode(.multicolor)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
         }
+        .frame(width: 720)
         .fixedSize(horizontal: false, vertical: true)
-        .background(StudioPalette.windowCanvas(for: colorScheme))
+        .navigationTitle("LimitWidget")
+        .navigationSubtitle(windowSubtitle)
+        .toolbar { toolbarContent }
         .preferredColorScheme(store.themeMode.preferredColorScheme)
+        #if DEBUG
+        .onAppear {
+            if UserDefaults.standard.string(forKey: "LWDebugOpen") == "add" { isAddingNew = true }
+            if UserDefaults.standard.string(forKey: "LWDebugOpen") == "manual" { isAddingNew = true }
+        }
+        #endif
         .sheet(isPresented: $isAddingNew) {
             SubscriptionEditorSheet(subscription: nil) { newSubscription in
                 store.add(newSubscription)
@@ -72,614 +76,458 @@ struct MainWindowView: View {
                 store.update(updated)
             }
         }
-        .confirmationDialog(
-            "Varsayılan sağlayıcı şablonuna dönülsün mü?",
-            isPresented: $showResetConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Şablonu Yükle ve Canlı Ölç", role: .destructive) {
-                store.resetToDefaults()
+        .alert(
+            "\(pendingDeletion?.providerName ?? "Sağlayıcı") silinsin mi?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            presenting: pendingDeletion
+        ) { item in
+            Button("Sil", role: .destructive) {
+                withAnimation(.snappy) {
+                    store.delete(id: item.id)
+                }
             }
             Button("Vazgeç", role: .cancel) {}
-        } message: {
-            Text("Mevcut özel abonelikleriniz varsayılan 4 sağlayıcıyla değiştirilip canlı kotalar yeniden okunacaktır.")
+        } message: { _ in
+            Text("Bu sağlayıcı listeden, menü çubuğundan ve widget'tan kaldırılır.")
         }
     }
 
-    // MARK: - Studio Telemetry Header
-
-    private var studioTelemetryHeader: some View {
-        HStack(alignment: .center, spacing: 20) {
-            // Sol: Uygulama Kimliği ve Canlı Telemetri Durumu
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    StudioPalette.statusColor(for: highestSeverity).opacity(0.24),
-                                    StudioPalette.statusColor(for: highestSeverity).opacity(0.06)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(
-                                    StudioPalette.statusColor(for: highestSeverity).opacity(0.42),
-                                    lineWidth: 1
-                                )
-                        )
-
-                    Image(systemName: "slider.horizontal.below.square.and.square.filled")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(StudioPalette.statusColor(for: highestSeverity))
-                }
-                .frame(width: 44, height: 44)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text("LIMITWIDGET")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .kerning(1.1)
-
-                        StudioTagPill(
-                            text: store.isSyncing ? "SENKRONİZE EDİLİYOR" : "CANLI TELEMETRİ",
-                            accent: StudioPalette.statusColor(for: highestSeverity)
-                        )
-                    }
-
-                    Text("Yerel CLI, OAuth ve App Group üzerinden gerçek zamanlı kota izleme konsolu")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer(minLength: 16)
-
-            // Sağ: Gömülü Enstrüman Okuma Modülü (Instrument Readout Deck)
-            HStack(spacing: 0) {
-                telemetryReadoutCell(
-                    label: "AKTİF HAT",
-                    value: "\(store.activeSubscriptions.count)/\(store.subscriptions.count)",
-                    valueColor: .primary
-                )
-                verticalReadoutHairline
-                telemetryReadoutCell(
-                    label: "ORTALAMA YÜK",
-                    value: "%\(store.averageUsagePercentage)",
-                    valueColor: StudioPalette.progressiveColor(for: Double(store.averageUsagePercentage) / 100.0)
-                )
-                verticalReadoutHairline
-                telemetryReadoutCell(
-                    label: "TAVAN YÜK",
-                    value: "%\(store.highestUsagePercentage)",
-                    valueColor: StudioPalette.progressiveColor(for: Double(store.highestUsagePercentage) / 100.0)
-                )
-                verticalReadoutHairline
-                telemetryReadoutCell(
-                    label: "KRİTİK",
-                    value: "\(store.criticalCount)",
-                    valueColor: store.criticalCount > 0 ? StudioPalette.criticalStart : .secondary
-                )
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(StudioPalette.recessedWell(for: colorScheme))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(
-                        isHoveringReadoutDeck
-                            ? StudioPalette.statusColor(for: highestSeverity).opacity(0.45)
-                            : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)),
-                        lineWidth: 1
-                    )
-            )
-            .onHover { hovering in
-                isHoveringReadoutDeck = hovering
-            }
-            .popover(isPresented: $isHoveringReadoutDeck, arrowEdge: .bottom) {
-                topRatioHoverBreakdownView
-            }
-        }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 14)
-        .background(StudioPalette.elevatedHeader(for: colorScheme))
+    private var windowSubtitle: String {
+        let active = store.activeSubscriptions.count
+        let total = store.subscriptions.count
+        if total == 0 { return "Sağlayıcı yok" }
+        return active == total ? "\(total) sağlayıcı izleniyor" : "\(active)/\(total) sağlayıcı izleniyor"
     }
 
-    private var topRatioHoverBreakdownView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("SAĞLAYICI KOTA DAĞILIMI")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .kerning(0.8)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("TAVAN %\(store.highestUsagePercentage)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(StudioPalette.statusColor(for: highestSeverity))
-            }
+    // MARK: Toolbar
 
-            ForEach(store.activeSubscriptions) { sub in
-                let statusColor = StudioPalette.progressiveColor(for: sub.usageRatio)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 7) {
-                        ProviderBrandBadge(subscription: sub, size: 18)
-                        Text(sub.providerName)
-                            .font(.system(size: 11.5, weight: .semibold))
-                        Spacer(minLength: 8)
-                        Text(sub.formattedResetCountdown())
-                            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                        Text("%\(sub.usagePercentage)")
-                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                            .foregroundStyle(statusColor)
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Picker("Sıralama", selection: $sortMode) {
+                    ForEach(SortMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
                     }
-
-                    StudioMeterBar(
-                        ratio: sub.usageRatio,
-                        severity: sub.severity,
-                        height: 5,
-                        showTicks: false
-                    )
-
-                    Text(sub.compactSummaryText)
-                        .font(.system(size: 9.5, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(StudioPalette.recessedWell(for: colorScheme))
-                )
-            }
-        }
-        .padding(12)
-        .frame(width: 310)
-        .background(StudioPalette.windowCanvas(for: colorScheme))
-    }
+                .pickerStyle(.inline)
 
-    private func telemetryReadoutCell(label: String, value: String, valueColor: Color) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .kerning(0.7)
-                .lineLimit(1)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 15, weight: .bold, design: .monospaced))
-                .lineLimit(1)
-                .foregroundStyle(valueColor)
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-    }
+                Divider()
 
-    private var verticalReadoutHairline: some View {
-        Rectangle()
-            .fill(colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.07))
-            .frame(width: 1, height: 28)
-    }
-
-    // MARK: - Studio Control Bar
-
-    private var studioControlBar: some View {
-        HStack(spacing: 8) {
-            // Filtre Kapsülü
-            HStack(spacing: 2) {
-                ForEach(FilterOption.allCases) { option in
-                    let isSelected = filterOption == option
-                    Button {
-                        withAnimation(.snappy(duration: 0.18)) {
-                            filterOption = option
-                        }
-                    } label: {
-                        Text(option.rawValue)
-                            .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .foregroundStyle(isSelected ? .primary : .secondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(
-                                        isSelected
-                                            ? (colorScheme == .dark ? Color.white.opacity(0.14) : Color.white)
-                                            : Color.clear
-                                    )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(3)
-            .fixedSize(horizontal: true, vertical: false)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(StudioPalette.recessedWell(for: colorScheme))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(
-                        colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.07),
-                        lineWidth: 0.75
-                    )
-            )
-
-            // Sıralama Seçici
-            HStack(spacing: 2) {
-                ForEach(SortOption.allCases) { option in
-                    let isSelected = sortOption == option
-                    Button {
-                        withAnimation(.snappy(duration: 0.18)) {
-                            sortOption = option
-                        }
-                    } label: {
-                        Text(option.rawValue)
-                            .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .foregroundStyle(isSelected ? .primary : .secondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(
-                                        isSelected
-                                            ? (colorScheme == .dark ? Color.white.opacity(0.14) : Color.white)
-                                            : Color.clear
-                                    )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(3)
-            .fixedSize(horizontal: true, vertical: false)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(StudioPalette.recessedWell(for: colorScheme))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(
-                        colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.07),
-                        lineWidth: 0.75
-                    )
-            )
-
-            // Tema Seçici (Sistem / Koyu / Açık)
-            HStack(spacing: 2) {
-                ForEach(AppThemeMode.allCases) { mode in
-                    let isSelected = store.themeMode == mode
-                    Button {
-                        withAnimation(.snappy(duration: 0.18)) {
-                            store.setThemeMode(mode)
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: mode.iconName)
-                                .font(.system(size: 10, weight: .semibold))
-                            Text(mode.displayName)
-                                .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
-                                .lineLimit(1)
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .foregroundStyle(isSelected ? .primary : .secondary)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(
-                                    isSelected
-                                        ? (colorScheme == .dark ? Color.white.opacity(0.14) : Color.white)
-                                        : Color.clear
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(3)
-            .fixedSize(horizontal: true, vertical: false)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(StudioPalette.recessedWell(for: colorScheme))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(
-                        colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.07),
-                        lineWidth: 0.75
-                    )
-            )
-
-            Spacer(minLength: 8)
-
-            Button {
-                showResetConfirmation = true
+                Toggle("Yalnızca sınıra yakın olanlar", isOn: $showsOnlyAttention)
             } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 10.5, weight: .semibold))
-                    Text("Sıfırla")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .lineLimit(1)
-                }
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(StudioPalette.recessedWell(for: colorScheme))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(
-                            colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.07),
-                            lineWidth: 0.75
-                        )
-                )
+                Label("Görünüm", systemImage: "line.3.horizontal.decrease")
             }
-            .buttonStyle(.plain)
-            .help("Varsayılan sağlayıcı şablonunu geri yükle")
+            .help("Sıralama ve filtre")
+        }
 
+        ToolbarItem(placement: .primaryAction) {
             Button {
                 Task { await store.syncLocalUsageAsync() }
             } label: {
-                HStack(spacing: 6) {
-                    if store.isSyncing {
-                        ProgressView()
-                            .controlSize(.mini)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    Text("Canlı Ölç")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .lineLimit(1)
+                Label {
+                    Text("Yenile")
+                } icon: {
+                    Image(systemName: "arrow.clockwise")
+                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: store.isSyncing)
                 }
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(StudioPalette.recessedWell(for: colorScheme))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(
-                            colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.10),
-                            lineWidth: 0.75
-                        )
-                )
             }
-            .buttonStyle(.plain)
             .disabled(store.isSyncing)
+            .keyboardShortcut("r", modifiers: .command)
+            .help("Kotaları şimdi yenile (⌘R)")
+        }
 
+        ToolbarItem(placement: .primaryAction) {
             Button {
                 isAddingNew = true
             } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .bold))
-                    Text("Sağlayıcı Ekle")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .lineLimit(1)
-                }
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.23, green: 0.51, blue: 0.96),
-                                    Color(red: 0.15, green: 0.39, blue: 0.92)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                )
+                Label("Sağlayıcı Ekle", systemImage: "plus")
             }
-            .buttonStyle(.plain)
+            .keyboardShortcut("n", modifiers: .command)
+            .help("Sağlayıcı ekle (⌘N)")
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 11)
-        .background(StudioPalette.elevatedHeader(for: colorScheme).opacity(0.75))
+
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+
+        ToolbarItem(placement: .primaryAction) {
+            Button(action: onOpenSettings) {
+                Label("Ayarlar", systemImage: "gearshape")
+            }
+            .keyboardShortcut(",", modifiers: .command)
+            .help("Ayarlar (⌘,)")
+        }
     }
 
-    // MARK: - Subscription Card List
+    // MARK: Providers
+
+    private func providersSection(now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Sağlayıcılar")
+                    .font(.system(size: 15, weight: .semibold))
+
+                Spacer()
+
+                Text(updatedText(now: now))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+            .padding(.horizontal, 4)
+
+            let items = visibleSubscriptions
+            if items.isEmpty {
+                emptyState
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 28)
+                    .surface()
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        ProviderCardRow(
+                            subscription: item,
+                            now: now,
+                            canMoveUp: sortMode == .custom && store.canMove(id: item.id, by: -1),
+                            canMoveDown: sortMode == .custom && store.canMove(id: item.id, by: 1),
+                            onEdit: { editingSubscription = item },
+                            onDelete: { pendingDeletion = item },
+                            onToggleEnabled: { store.setEnabled(!item.isEnabled, id: item.id) },
+                            onSelectWindow: { store.setWindowType($0, id: item.id) },
+                            onMove: { offset in
+                                withAnimation(.snappy) {
+                                    store.move(id: item.id, by: offset)
+                                }
+                            }
+                        )
+
+                        if index < items.count - 1 {
+                            Divider()
+                                .padding(.leading, 70)
+                                .padding(.trailing, 18)
+                        }
+                    }
+                }
+                .surface()
+            }
+        }
+    }
 
     @ViewBuilder
-    private var subscriptionList: some View {
-        if filteredSubscriptions.isEmpty {
-            VStack(spacing: 12) {
-                Image(systemName: "waveform.path.ecg.rectangle")
-                    .font(.system(size: 32, weight: .thin))
-                    .foregroundStyle(.secondary)
-                Text("Bu filtreye uygun sağlayıcı bulunmuyor")
-                    .font(.system(size: 14, weight: .semibold))
-                Text("Tüm sağlayıcıları görüntüleyin veya yeni bir abonelik kartı ekleyin.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+    private var emptyState: some View {
+        if store.subscriptions.isEmpty {
+            ContentUnavailableView {
+                Label("Henüz sağlayıcı yok", systemImage: "gauge.with.dots.needle.33percent")
+            } description: {
+                Text("Claude Code, Codex, Antigravity veya OpenCode kotanızı izlemek için bir sağlayıcı ekleyin.")
+            } actions: {
+                Button("Sağlayıcı Ekle") { isAddingNew = true }
+                    .buttonStyle(.glassProminent)
             }
-            .frame(maxWidth: .infinity, minHeight: 220)
         } else {
-            VStack(spacing: 10) {
-                ForEach(filteredSubscriptions) { subscription in
-                    studioProviderCard(for: subscription)
-                }
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 14)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func studioProviderCard(for subscription: AISubscription) -> some View {
-        let isHovered = hoveredCardID == subscription.id
-        let brand = ProviderBrand.resolve(for: subscription)
-
-        return HStack(spacing: 14) {
-            // Sol marka aksan şeridi
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(brand.gradient)
-                .frame(width: 3.5)
-                .padding(.vertical, 4)
-
-            SubscriptionProgressRow(subscription: subscription, style: .detailed)
-
-            // Sağ: Stüdyo Hızlı İşlem Sütunu
-            VStack(spacing: 6) {
-                Button {
-                    togglePrimaryWindow(for: subscription)
-                } label: {
-                    Text(subscription.windowType.shortLabel.uppercased())
-                        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 34, height: 24)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(StudioPalette.recessedWell(for: colorScheme))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .strokeBorder(
-                                    colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.07),
-                                    lineWidth: 0.75
-                                )
-                        )
-                }
-                .buttonStyle(.plain)
-                .help("Ana çubuk penceresini değiştir (5sa / Haftalık / Aylık)")
-
-                HStack(spacing: 5) {
-                    Button {
-                        editingSubscription = subscription
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 26, height: 24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(StudioPalette.recessedWell(for: colorScheme))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .help("Yapılandır")
-
-                    Button {
-                        store.delete(id: subscription.id)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(StudioPalette.criticalStart.opacity(0.85))
-                            .frame(width: 26, height: 24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(StudioPalette.recessedWell(for: colorScheme))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .help("Kaldır")
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(StudioPalette.cardFill(for: colorScheme, isHovered: isHovered))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .strokeBorder(
-                    StudioPalette.cardBorder(
-                        for: colorScheme,
-                        accent: brand.primary,
-                        isHovered: isHovered
-                    ),
-                    lineWidth: 1
-                )
-        )
-        .opacity(subscription.isEnabled ? 1.0 : 0.55)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.15)) {
-                hoveredCardID = hovering ? subscription.id : nil
+            ContentUnavailableView {
+                Label("Sınıra yakın sağlayıcı yok", systemImage: "checkmark.circle")
+            } description: {
+                Text("Tüm kotalar %70'in altında.")
+            } actions: {
+                Button("Tümünü Göster") { showsOnlyAttention = false }
+                    .buttonStyle(.glass)
             }
         }
     }
 
-    private func togglePrimaryWindow(for subscription: AISubscription) {
-        var updated = subscription
-        switch subscription.windowType {
-        case .fiveHour:
-            updated.windowType = .weekly
-        case .weekly:
-            updated.windowType = subscription.providerKey == LocalProviderKey.opencode.rawValue ? .monthly : .fiveHour
-        case .monthly, .daily, .creditBalance:
-            updated.windowType = .fiveHour
-        }
-        store.update(updated)
-    }
-
-    // MARK: - Footer
-
-    private var studioStatusFooter: some View {
-        HStack(spacing: 10) {
-            StudioStatusDot(
-                color: store.isSyncing ? StudioPalette.warningEnd : StudioPalette.normalEnd,
-                size: 5.5
-            )
-
-            Text(
-                store.isSyncing
-                    ? "CANLI KOTA KAYNAKLARI SORGULANIYOR…"
-                    : "SON GÜNCELLEME: \(store.lastRefreshedAt.formatted(date: .omitted, time: .standard))"
-            )
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .kerning(0.5)
-            .foregroundStyle(.secondary)
-
-            Spacer()
-
-            if let errorMessage = store.lastErrorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(StudioPalette.criticalStart)
-            } else {
-                Text("APP GROUP & WIDGETKIT SENKRONİZE")
-                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                    .kerning(0.5)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 9)
-        .background(StudioPalette.elevatedHeader(for: colorScheme))
-    }
-
-    private var hairlineDivider: some View {
-        Rectangle()
-            .fill(colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.07))
-            .frame(height: 1)
+    private func updatedText(now: Date) -> String {
+        if store.isSyncing { return "Kotalar okunuyor…" }
+        let seconds = now.timeIntervalSince(store.lastRefreshedAt)
+        if seconds < 60 { return "Az önce güncellendi" }
+        let minutes = Int(seconds / 60)
+        if minutes < 60 { return "\(minutes) dk önce güncellendi" }
+        return "Son güncelleme \(store.lastRefreshedAt.formatted(date: .omitted, time: .shortened))"
     }
 }
 
-/// Sadeleştirilmiş, tek tıkla hazır şablonlu ve canlı önizlemeli sağlayıcı ekleme/düzenleme paneli.
+// MARK: - Overview
+
+/// En yüksek kullanımı halka ile, durumu tek cümleyle anlatan özet kartı.
+private struct OverviewCard: View {
+    let store: SubscriptionStore
+    let now: Date
+
+    private static let turkish = Locale(identifier: "tr_TR")
+
+    var body: some View {
+        let peak = store.peakSubscription
+        let ratio = peak?.usageRatio ?? 0
+
+        HStack(alignment: .center, spacing: 24) {
+            UsageRing(ratio: ratio, lineWidth: 10) {
+                VStack(spacing: 0) {
+                    Text(AISubscription.percentText(peak?.usagePercentage ?? 0))
+                        .numericStyle(size: 26)
+                        .contentTransition(.numericText())
+                    Text("en yüksek")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 112, height: 112)
+            .animation(.smooth, value: ratio)
+
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(headline)
+                        .font(.system(size: 20, weight: .semibold))
+                    Text(detail(peak: peak))
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: 0) {
+                    stat(title: "Ortalama", value: AISubscription.percentText(store.averageUsagePercentage))
+                    statDivider
+                    stat(title: "İzlenen", value: "\(store.activeSubscriptions.count)")
+                    statDivider
+                    stat(title: "Sıradaki yenilenme", value: nextResetText)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(22)
+        .surface()
+    }
+
+    private var headline: String {
+        let active = store.activeSubscriptions
+        guard !active.isEmpty else { return "Takip edilen sağlayıcı yok" }
+        let critical = active.filter { $0.severity == .critical }
+        let warning = active.filter { $0.severity == .warning }
+        if critical.count == 1, let item = critical.first {
+            return "\(item.providerName) kotası dolmak üzere"
+        }
+        if critical.count > 1 {
+            return "\(critical.count) sağlayıcının kotası dolmak üzere"
+        }
+        if warning.count == 1, let item = warning.first {
+            return "\(item.providerName) sınırına yaklaşıyor"
+        }
+        if warning.count > 1 {
+            return "\(warning.count) sağlayıcı sınıra yaklaşıyor"
+        }
+        return "Tüm kotalar rahat"
+    }
+
+    private func detail(peak: AISubscription?) -> String {
+        guard let peak else {
+            return "Araç çubuğundaki + düğmesiyle bir sağlayıcı ekleyin."
+        }
+        let window = peak.windowType.displayName.lowercased(with: Self.turkish)
+        var sentence = "En yüksek kullanım \(peak.providerName) \(window) kotasında."
+        if let phrase = peak.resetPhrase(relativeTo: now), phrase != "şimdi" {
+            sentence += " \(phrase) sonra yenilenir."
+        }
+        return sentence
+    }
+
+    private var nextResetText: String {
+        guard let next = store.nextResettingSubscription(now: now),
+              let phrase = next.resetPhrase(relativeTo: now) else {
+            return "—"
+        }
+        return phrase
+    }
+
+    private func stat(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .numericStyle(size: 15, weight: .medium)
+                .contentTransition(.numericText())
+        }
+        .padding(.trailing, 18)
+    }
+
+    private var statDivider: some View {
+        Divider()
+            .frame(height: 28)
+            .padding(.trailing, 18)
+    }
+}
+
+// MARK: - Provider row
+
+private struct ProviderCardRow: View {
+    let subscription: AISubscription
+    let now: Date
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    let onToggleEnabled: () -> Void
+    let onSelectWindow: (SubscriptionWindowType) -> Void
+    let onMove: (Int) -> Void
+
+    @State private var isHovered = false
+
+    private var windowChoices: [SubscriptionWindowType] {
+        guard subscription.dataSource == .localAuto else { return [] }
+        switch subscription.effectiveProviderKey {
+        case LocalProviderKey.claudeCode.rawValue, LocalProviderKey.codex.rawValue:
+            return [.fiveHour, .weekly]
+        case LocalProviderKey.opencode.rawValue:
+            return [.fiveHour, .weekly, .monthly]
+        default:
+            return []
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            ProviderIcon(subscription: subscription, size: 38)
+                .saturation(subscription.isEnabled ? 1 : 0)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(subscription.providerName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .lineLimit(1)
+
+                            if subscription.dataSource != .localAuto {
+                                Tag(text: "Manuel")
+                            }
+                            if !subscription.isEnabled {
+                                Tag(text: "Menü çubuğunda gizli")
+                            }
+                        }
+
+                        Text(subscription.secondaryLine)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(subscription.percentText)
+                            .numericStyle(size: 22)
+                            .foregroundStyle(UsageTone.textStyle(for: subscription.severity))
+                            .contentTransition(.numericText())
+                        if let sentence = subscription.resetSentence(relativeTo: now) {
+                            Text(sentence)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    actionsMenu
+                }
+
+                UsageBar(ratio: subscription.usageRatio, height: 7)
+                    .animation(.smooth, value: subscription.usageRatio)
+
+                let metrics = subscription.displayMetrics
+                if !metrics.isEmpty {
+                    MetricStrip(metrics: metrics)
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .opacity(subscription.isEnabled ? 1 : 0.62)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .contextMenu { menuItems }
+        .onTapGesture(count: 2, perform: onEdit)
+    }
+
+    private var actionsMenu: some View {
+        Menu {
+            menuItems
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 26, height: 26)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .opacity(isHovered ? 1 : 0.55)
+        .help("Diğer işlemler")
+    }
+
+    @ViewBuilder
+    private var menuItems: some View {
+        Button("Düzenle…", systemImage: "slider.horizontal.3", action: onEdit)
+
+        if !windowChoices.isEmpty {
+            Picker(
+                "Ana kota",
+                selection: Binding(
+                    get: { subscription.windowType },
+                    set: { onSelectWindow($0) }
+                )
+            ) {
+                ForEach(windowChoices) { window in
+                    Text(window.displayName).tag(window)
+                }
+            }
+        }
+
+        Button(
+            subscription.isEnabled ? "Menü çubuğunda gizle" : "Menü çubuğunda göster",
+            systemImage: subscription.isEnabled ? "eye.slash" : "eye",
+            action: onToggleEnabled
+        )
+
+        Divider()
+
+        Button("Yukarı taşı", systemImage: "arrow.up") { onMove(-1) }
+            .disabled(!canMoveUp)
+        Button("Aşağı taşı", systemImage: "arrow.down") { onMove(1) }
+            .disabled(!canMoveDown)
+
+        Divider()
+
+        Button("Sil…", systemImage: "trash", role: .destructive, action: onDelete)
+    }
+}
+
+private struct Tag: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1.5)
+            .background(Capsule(style: .continuous).fill(.quaternary))
+    }
+}
+
+// MARK: - Surface
+
+extension View {
+    /// İçerik kartları için Liquid Glass yüzey.
+    func surface(cornerRadius: CGFloat = 20) -> some View {
+        glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+    }
+}
+
+// MARK: - Editor
+
+/// Sağlayıcı ekleme ve düzenleme sayfası (Sistem Ayarları düzeninde form).
 private struct SubscriptionEditorSheet: View {
     private struct QuickTemplate: Identifiable {
         let id: String
@@ -688,59 +536,26 @@ private struct SubscriptionEditorSheet: View {
         let subtitle: String
         let icon: String
         let window: SubscriptionWindowType
-        let isAuto: Bool
+        var detail: String = ""
     }
 
     private static let autoTemplates: [QuickTemplate] = [
-        QuickTemplate(
-            id: "claude_code",
-            key: .claudeCode,
-            name: "Claude Code",
-            subtitle: "Max / Pro • Otomatik Canlı Kota",
-            icon: "sparkles",
-            window: .weekly,
-            isAuto: true
-        ),
-        QuickTemplate(
-            id: "antigravity",
-            key: .antigravity,
-            name: "Antigravity",
-            subtitle: "Gemini & Claude/GPT • Canlı Kota",
-            icon: "atom",
-            window: .fiveHour,
-            isAuto: true
-        ),
-        QuickTemplate(
-            id: "codex",
-            key: .codex,
-            name: "Codex",
-            subtitle: "ChatGPT Plus/Pro • Canlı Kota",
-            icon: "terminal",
-            window: .weekly,
-            isAuto: true
-        ),
-        QuickTemplate(
-            id: "opencode",
-            key: .opencode,
-            name: "OpenCode",
-            subtitle: "OpenCode Go • Canlı Kota",
-            icon: "chevron.left.forwardslash.chevron.right",
-            window: .monthly,
-            isAuto: true
-        )
+        QuickTemplate(id: "claude_code", key: .claudeCode, name: "Claude Code", subtitle: "", icon: "sparkles", window: .weekly, detail: "Anthropic · 5 saatlik ve haftalık kota"),
+        QuickTemplate(id: "antigravity", key: .antigravity, name: "Antigravity", subtitle: "", icon: "atom", window: .fiveHour, detail: "Google · Gemini ve Claude/GPT kotası"),
+        QuickTemplate(id: "codex", key: .codex, name: "Codex", subtitle: "", icon: "terminal", window: .weekly, detail: "OpenAI · 5 saatlik ve haftalık kota"),
+        QuickTemplate(id: "opencode", key: .opencode, name: "OpenCode", subtitle: "", icon: "chevron.left.forwardslash.chevron.right", window: .monthly, detail: "OpenCode Go · 5 saatlik, haftalık ve aylık")
     ]
 
     private static let manualPresets: [QuickTemplate] = [
-        QuickTemplate(id: "cursor", key: .custom, name: "Cursor", subtitle: "Pro Plan • 500 Hızlı İstek", icon: "cursorarrow.rays", window: .monthly, isAuto: false),
-        QuickTemplate(id: "copilot", key: .custom, name: "GitHub Copilot", subtitle: "Premium İstek Kotası", icon: "network", window: .monthly, isAuto: false),
-        QuickTemplate(id: "windsurf", key: .custom, name: "Windsurf", subtitle: "Pro Flow Kredisi", icon: "bolt.fill", window: .monthly, isAuto: false),
-        QuickTemplate(id: "deepseek", key: .custom, name: "DeepSeek", subtitle: "API / Aylık Kullanım", icon: "cpu", window: .monthly, isAuto: false)
+        QuickTemplate(id: "cursor", key: .custom, name: "Cursor", subtitle: "Pro Plan", icon: "cursorarrow.rays", window: .monthly),
+        QuickTemplate(id: "copilot", key: .custom, name: "GitHub Copilot", subtitle: "Premium istekler", icon: "chevron.left.forwardslash.chevron.right", window: .monthly),
+        QuickTemplate(id: "windsurf", key: .custom, name: "Windsurf", subtitle: "Pro Plan", icon: "wind", window: .monthly),
+        QuickTemplate(id: "deepseek", key: .custom, name: "DeepSeek", subtitle: "API", icon: "cpu", window: .monthly)
     ]
 
     private static let simpleWindows: [SubscriptionWindowType] = [.fiveHour, .daily, .weekly, .monthly]
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
 
     let existingSubscription: AISubscription?
     let onSave: (AISubscription) -> Void
@@ -759,21 +574,20 @@ private struct SubscriptionEditorSheet: View {
         self.onSave = onSave
 
         if let sub = subscription {
-            _dataSource = State(initialValue: sub.dataSource)
+            _dataSource = State(initialValue: sub.dataSource == .localAuto ? .localAuto : .manual)
             _providerKey = State(initialValue: LocalProviderKey(rawValue: sub.providerKey) ?? .custom)
             _providerName = State(initialValue: sub.providerName)
-            _subtitle = State(initialValue: sub.subtitle)
+            _subtitle = State(initialValue: sub.dataSource == .localAuto ? "" : sub.subtitle)
             _iconName = State(initialValue: sub.iconName)
             _windowType = State(initialValue: sub.windowType)
             _usedPercentage = State(initialValue: Double(sub.usagePercentage))
             _isEnabled = State(initialValue: sub.isEnabled)
         } else {
-            // Varsayılan olarak en pratik mod: Otomatik Claude Code seçili başlar
             let first = Self.autoTemplates[0]
             _dataSource = State(initialValue: .localAuto)
             _providerKey = State(initialValue: first.key)
             _providerName = State(initialValue: first.name)
-            _subtitle = State(initialValue: first.subtitle)
+            _subtitle = State(initialValue: "")
             _iconName = State(initialValue: first.icon)
             _windowType = State(initialValue: first.window)
             _usedPercentage = State(initialValue: 25)
@@ -781,262 +595,147 @@ private struct SubscriptionEditorSheet: View {
         }
     }
 
+    private var trimmedName: String {
+        providerName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var previewSubscription: AISubscription {
-        AISubscription(
-            id: existingSubscription?.id ?? UUID(),
-            providerKey: dataSource == .localAuto ? providerKey.rawValue : LocalProviderKey.custom.rawValue,
-            providerName: providerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Sağlayıcı Adı" : providerName,
-            subtitle: subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? (dataSource == .localAuto ? "Otomatik Canlı Kota" : "%\(Int(usedPercentage.rounded())) Kullanıldı")
-                : subtitle,
+        let isAuto = dataSource == .localAuto
+        let existing = existingSubscription
+        let keepsLiveValues = isAuto && existing?.dataSource == .localAuto && existing?.providerKey == providerKey.rawValue
+        return AISubscription(
+            id: existing?.id ?? UUID(),
+            providerKey: isAuto ? providerKey.rawValue : LocalProviderKey.custom.rawValue,
+            providerName: trimmedName.isEmpty ? "Sağlayıcı" : trimmedName,
+            subtitle: keepsLiveValues ? (existing?.subtitle ?? "") : subtitle,
             iconName: iconName,
             windowType: windowType,
-            usedAmount: dataSource == .localAuto ? (existingSubscription?.usedAmount ?? 35) : usedPercentage,
+            usedAmount: isAuto ? (keepsLiveValues ? (existing?.usedAmount ?? 0) : 0) : usedPercentage.rounded(),
             totalLimit: 100,
             unitLabel: "%",
-            resetsAt: existingSubscription?.resetsAt,
+            resetsAt: keepsLiveValues ? existing?.resetsAt : nil,
             resetDescription: windowType.displayName,
             dataSource: dataSource,
             isEnabled: isEnabled,
-            sortOrder: existingSubscription?.sortOrder ?? 0,
+            sortOrder: existing?.sortOrder ?? 0,
             lastUpdated: Date()
         )
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Başlık
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(existingSubscription == nil ? "Sağlayıcı Ekle" : "Sağlayıcıyı Düzenle")
-                        .font(.system(size: 16, weight: .bold))
-                    Text("Hazır bir servis seçin veya özel bir abonelik yüzdesi tanımlayın.")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            Form {
+                Section("Önizleme") {
+                    ProviderSummaryRow(subscription: previewSubscription)
+                        .padding(.vertical, 4)
                 }
-                Spacer()
-            }
 
-            // Canlı Önizleme Kartı
-            VStack(alignment: .leading, spacing: 6) {
-                Text("ÖNİZLEME")
-                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                    .kerning(0.7)
+                Section {
+                    Picker("Takip", selection: $dataSource) {
+                        Text("Otomatik").tag(SubscriptionDataSource.localAuto)
+                        Text("Manuel").tag(SubscriptionDataSource.manual)
+                    }
+                    .pickerStyle(.segmented)
+                } footer: {
+                    Text(
+                        dataSource == .localAuto
+                            ? "Kullanım, bu Mac'teki aracın kendi kayıtlarından kendiliğinden okunur."
+                            : "Kullanımı siz girersiniz; istediğiniz zaman güncelleyebilirsiniz."
+                    )
                     .foregroundStyle(.secondary)
+                }
 
-                SubscriptionProgressRow(subscription: previewSubscription, style: .compact)
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .fill(StudioPalette.cardFill(for: colorScheme))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .strokeBorder(StudioPalette.cardBorder(for: colorScheme), lineWidth: 1)
-                    )
-            }
+                if dataSource == .localAuto {
+                    Section("Servis") {
+                        ForEach(Self.autoTemplates) { template in
+                            autoTemplateRow(template)
+                        }
+                    }
+                } else {
+                    Section("Servis") {
+                        TextField("Ad", text: $providerName, prompt: Text("Örn. Cursor"))
+                        TextField("Plan", text: $subtitle, prompt: Text("İsteğe bağlı"))
+                        LabeledContent("Hazır şablon") {
+                            Menu("Seç") {
+                                ForEach(Self.manualPresets) { preset in
+                                    Button(preset.name) { applyTemplate(preset) }
+                                }
+                            }
+                            .fixedSize()
+                        }
+                    }
 
-            // 1. Mod Seçimi: Otomatik Bağlantı vs Manuel Takip
-            Picker("Takip Türü", selection: $dataSource) {
-                Text("Otomatik (Canlı Okuma)").tag(SubscriptionDataSource.localAuto)
-                Text("Manuel (Özel Sağlayıcı)").tag(SubscriptionDataSource.manual)
+                    Section("Kullanım") {
+                        LabeledContent("Kullanılan") {
+                            Text(AISubscription.percentText(Int(usedPercentage.rounded())))
+                                .monospacedDigit()
+                                .foregroundStyle(UsageTone.textStyle(forRatio: usedPercentage / 100))
+                        }
+                        Slider(value: $usedPercentage, in: 0...100, step: 1)
+                            .labelsHidden()
+                    }
+                }
+
+                Section {
+                    Picker("Kota dönemi", selection: $windowType) {
+                        ForEach(Self.simpleWindows) { type in
+                            Text(type.displayName).tag(type)
+                        }
+                    }
+                    Toggle("Menü çubuğunda ve widget'ta göster", isOn: $isEnabled)
+                }
             }
-            .pickerStyle(.segmented)
+            .formStyle(.grouped)
+            .scrollBounceBehavior(.basedOnSize)
             .onChange(of: dataSource) { _, newValue in
                 if newValue == .localAuto {
-                    let match = Self.autoTemplates.first(where: { $0.key == providerKey }) ?? Self.autoTemplates[0]
+                    let match = Self.autoTemplates.first { $0.key == providerKey } ?? Self.autoTemplates[0]
                     applyTemplate(match)
                 } else if Self.autoTemplates.contains(where: { $0.name == providerName }) {
                     applyTemplate(Self.manualPresets[0])
                 }
             }
 
-            if dataSource == .localAuto {
-                // Otomatik Sağlayıcı Kartları (Tek Tıkla Seçim)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("1. DESTEKLENEN SERVİSİ SEÇİN")
-                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .kerning(0.7)
-                        .foregroundStyle(.secondary)
-
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                        ForEach(Self.autoTemplates) { tpl in
-                            let isSelected = providerKey == tpl.key
-                            let dummySub = AISubscription(
-                                providerKey: tpl.key.rawValue,
-                                providerName: tpl.name,
-                                iconName: tpl.icon,
-                                windowType: tpl.window,
-                                usedAmount: 0,
-                                totalLimit: 100
-                            )
-                            let brand = ProviderBrand.resolve(for: dummySub)
-
-                            Button {
-                                applyTemplate(tpl)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    ProviderBrandBadge(subscription: dummySub, size: 30)
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(tpl.name)
-                                            .font(.system(size: 12.5, weight: .semibold))
-                                            .foregroundStyle(.primary)
-                                            .lineLimit(1)
-                                        Text(tpl.window.displayName)
-                                            .font(.system(size: 10, weight: .medium))
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    Spacer(minLength: 0)
-                                    if isSelected {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(brand.primary)
-                                            .font(.system(size: 14))
-                                    }
-                                }
-                                .padding(10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(
-                                            isSelected
-                                                ? brand.primary.opacity(colorScheme == .dark ? 0.16 : 0.10)
-                                                : StudioPalette.recessedWell(for: colorScheme)
-                                        )
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .strokeBorder(
-                                            isSelected
-                                                ? brand.primary.opacity(0.65)
-                                                : (colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.07)),
-                                            lineWidth: isSelected ? 1.4 : 0.8
-                                        )
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            } else {
-                // Manuel Sağlayıcı Girişi (Hızlı Şablonlar + İsim + Yüzde Kaydırıcısı)
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("HIZLI ŞABLONLAR")
-                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .kerning(0.7)
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 6) {
-                        ForEach(Self.manualPresets) { preset in
-                            let isSelected = providerName.lowercased() == preset.name.lowercased()
-                            Button {
-                                applyTemplate(preset)
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Image(systemName: preset.icon)
-                                        .font(.system(size: 10, weight: .semibold))
-                                    Text(preset.name)
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .lineLimit(1)
-                                }
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 5)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(
-                                            isSelected
-                                                ? Color.accentColor.opacity(0.18)
-                                                : StudioPalette.recessedWell(for: colorScheme)
-                                        )
-                                )
-                                .overlay(
-                                    Capsule(style: .continuous)
-                                        .strokeBorder(
-                                            isSelected ? Color.accentColor : Color.secondary.opacity(0.2),
-                                            lineWidth: 0.8
-                                        )
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Sağlayıcı Adı")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                            TextField("Örn. Cursor, Copilot, DeepSeek", text: $providerName)
-                                .textFieldStyle(.roundedBorder)
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Plan / Açıklama (İsteğe Bağlı)")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                            TextField("Örn. Pro Plan", text: $subtitle)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Mevcut Kullanım Yüzdesi")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text("%\(Int(usedPercentage.rounded()))")
-                                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                .foregroundStyle(StudioPalette.progressiveColor(for: usedPercentage / 100.0))
-                        }
-                        Slider(value: $usedPercentage, in: 0...100, step: 1)
-                    }
-                }
-            }
-
-            // 2. Kota Yenilenme Periyodu (Sadece 4 net seçenek)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("YENİLENME PERİYODU")
-                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                    .kerning(0.7)
-                    .foregroundStyle(.secondary)
-
-                Picker("Periyot", selection: $windowType) {
-                    ForEach(Self.simpleWindows) { type in
-                        Text(type.displayName).tag(type)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-
-            Divider()
-
-            // Alt Çubuk: Aktif Anahtarı + İptal / Kaydet
             HStack {
-                Toggle("Menü Çubuğu ve Widget'ta Göster", isOn: $isEnabled)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .font(.system(size: 11.5, weight: .medium))
-
                 Spacer()
-
-                Button("İptal") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-
-                Button(existingSubscription == nil ? "Sağlayıcıyı Ekle" : "Kaydet") {
-                    save()
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(providerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Vazgeç", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(existingSubscription == nil ? "Ekle" : "Kaydet") { save() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(trimmedName.isEmpty)
             }
+            .controlSize(.large)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 18)
+            .padding(.top, 4)
         }
-        .padding(20)
-        .frame(width: 480)
-        .background(StudioPalette.windowCanvas(for: colorScheme))
+        .frame(width: 480, height: dataSource == .localAuto ? 600 : 640)
+    }
+
+    private func autoTemplateRow(_ template: QuickTemplate) -> some View {
+        let isSelected = providerKey == template.key
+        return Button {
+            applyTemplate(template)
+        } label: {
+            HStack(spacing: 10) {
+                ProviderIcon(key: template.key.rawValue, name: template.name, fallbackSymbol: template.icon, size: 26)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(template.name)
+                    Text(template.detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func applyTemplate(_ template: QuickTemplate) {
@@ -1048,27 +747,27 @@ private struct SubscriptionEditorSheet: View {
     }
 
     private func save() {
-        let trimmedName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedSubtitle = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedKey = dataSource == .localAuto
-            ? providerKey.rawValue
-            : AISubscription.inferProviderKey(from: trimmedName)
+        let isAuto = dataSource == .localAuto
+        let resolvedKey = isAuto ? providerKey.rawValue : AISubscription.inferProviderKey(from: trimmedName)
+        let existing = existingSubscription
+        let keepsLiveValues = isAuto && existing?.dataSource == .localAuto && existing?.providerKey == providerKey.rawValue
 
         let item = AISubscription(
-            id: existingSubscription?.id ?? UUID(),
+            id: existing?.id ?? UUID(),
             providerKey: resolvedKey,
             providerName: trimmedName,
-            subtitle: trimmedSubtitle.isEmpty ? windowType.displayName : trimmedSubtitle,
+            subtitle: isAuto ? (keepsLiveValues ? (existing?.subtitle ?? "") : "") : trimmedSubtitle,
             iconName: iconName,
             windowType: windowType,
-            usedAmount: dataSource == .localAuto ? (existingSubscription?.usedAmount ?? 0) : usedPercentage.rounded(),
+            usedAmount: isAuto ? (keepsLiveValues ? (existing?.usedAmount ?? 0) : 0) : usedPercentage.rounded(),
             totalLimit: 100,
             unitLabel: "%",
-            resetsAt: existingSubscription?.resetsAt,
+            resetsAt: keepsLiveValues ? existing?.resetsAt : nil,
             resetDescription: windowType.displayName,
             dataSource: dataSource,
             isEnabled: isEnabled,
-            sortOrder: existingSubscription?.sortOrder ?? 0,
+            sortOrder: existing?.sortOrder ?? 0,
             lastUpdated: Date()
         )
         onSave(item)

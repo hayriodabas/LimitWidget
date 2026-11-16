@@ -195,6 +195,7 @@ final class SubscriptionStore {
     private let collector: LocalUsageCollector
     private let onDidPersist: @Sendable () -> Void
     private var autoSyncTask: Task<Void, Never>?
+    private var needsResync = false
 
     init(
         repository: SubscriptionRepository = SubscriptionRepository(),
@@ -265,7 +266,10 @@ final class SubscriptionStore {
 
     /// Ana iş parçacığını kilitlemeden arka planda yerel kullanım verilerini yeniler.
     func syncLocalUsageAsync(now: Date = Date()) async {
-        guard !isSyncing else { return }
+        guard !isSyncing else {
+            needsResync = true
+            return
+        }
         isSyncing = true
         defer { isSyncing = false }
 
@@ -276,14 +280,37 @@ final class SubscriptionStore {
         }.value
 
         let refreshedByID = Dictionary(uniqueKeysWithValues: refreshed.map { ($0.id, $0) })
+        let snapshotByID = Dictionary(uniqueKeysWithValues: snapshot.map { ($0.id, $0) })
         for index in subscriptions.indices {
-            guard subscriptions[index].dataSource == .localAuto,
-                  let updated = refreshedByID[subscriptions[index].id] else {
+            let current = subscriptions[index]
+            guard current.dataSource == .localAuto,
+                  let measured = refreshedByID[current.id],
+                  let before = snapshotByID[current.id] else {
                 continue
             }
-            subscriptions[index] = updated
+            // Ölçüm sürerken kullanıcı sağlayıcıyı veya dönemini değiştirdiyse eski ölçümü yazma; yeniden ölç.
+            guard before.providerKey == current.providerKey,
+                  before.windowType == current.windowType else {
+                needsResync = true
+                continue
+            }
+            var merged = current
+            merged.usedAmount = measured.usedAmount
+            merged.totalLimit = measured.totalLimit
+            merged.unitLabel = measured.unitLabel
+            merged.resetsAt = measured.resetsAt
+            merged.resetDescription = measured.resetDescription
+            merged.subtitle = measured.subtitle
+            merged.lastUpdated = measured.lastUpdated
+            subscriptions[index] = merged
         }
         persist()
+
+        if needsResync {
+            needsResync = false
+            isSyncing = false
+            await syncLocalUsageAsync()
+        }
     }
 
     /// Menü çubuğu çalışırken belirli aralıklarla yerel verileri otomatik tazeler.
@@ -304,11 +331,11 @@ final class SubscriptionStore {
         var newItem = subscription
         newItem.sortOrder = (subscriptions.map(\.sortOrder).max() ?? -1) + 1
         newItem.lastUpdated = Date()
-        if newItem.dataSource == .localAuto {
-            newItem = collector.collectUsage(for: newItem)
-        }
         subscriptions.append(newItem)
         persist()
+        if newItem.dataSource == .localAuto {
+            Task { await syncLocalUsageAsync() }
+        }
     }
 
     func update(_ subscription: AISubscription) {
@@ -317,11 +344,11 @@ final class SubscriptionStore {
         }
         var updated = subscription
         updated.lastUpdated = Date()
-        if updated.dataSource == .localAuto {
-            updated = collector.collectUsage(for: updated)
-        }
         subscriptions[index] = updated
         persist()
+        if updated.dataSource == .localAuto {
+            Task { await syncLocalUsageAsync() }
+        }
     }
 
     func delete(id: UUID) {
@@ -332,7 +359,66 @@ final class SubscriptionStore {
 
     func resetToDefaults() {
         subscriptions = AISubscription.makeDefaultSubscriptions()
-        syncLocalUsage()
+        persist()
+        Task { await syncLocalUsageAsync() }
+    }
+
+    /// Tüm abonelikler kullanıcı sırasıyla.
+    var orderedSubscriptions: [AISubscription] {
+        subscriptions.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    /// En yüksek doluluktaki etkin abonelik.
+    var peakSubscription: AISubscription? {
+        activeSubscriptions.max { $0.usageRatio < $1.usageRatio }
+    }
+
+    /// Yenilenmesi en yakın olan etkin abonelik.
+    func nextResettingSubscription(now: Date = Date()) -> AISubscription? {
+        activeSubscriptions
+            .compactMap { item -> (AISubscription, Date)? in
+                guard let date = item.resetsAt, date > now else { return nil }
+                return (item, date)
+            }
+            .min { $0.1 < $1.1 }?
+            .0
+    }
+
+    /// Menü çubuğu ve widget'ta gösterimi açar/kapatır (yeniden ölçüm yapmadan).
+    func setEnabled(_ isEnabled: Bool, id: UUID) {
+        guard let index = subscriptions.firstIndex(where: { $0.id == id }) else { return }
+        subscriptions[index].isEnabled = isEnabled
+        persist()
+    }
+
+    /// Ana kota dönemini değiştirir ve yalnız bu sağlayıcıyı arka planda yeniden okur.
+    func setWindowType(_ windowType: SubscriptionWindowType, id: UUID) {
+        guard let index = subscriptions.firstIndex(where: { $0.id == id }) else { return }
+        subscriptions[index].windowType = windowType
+        persist()
+        guard subscriptions[index].dataSource == .localAuto else { return }
+        Task { await syncLocalUsageAsync() }
+    }
+
+    func canMove(id: UUID, by offset: Int) -> Bool {
+        let ordered = orderedSubscriptions
+        guard let position = ordered.firstIndex(where: { $0.id == id }) else { return false }
+        return ordered.indices.contains(position + offset)
+    }
+
+    /// Sağlayıcıyı listede yukarı (-1) veya aşağı (+1) taşır.
+    func move(id: UUID, by offset: Int) {
+        var ordered = orderedSubscriptions
+        guard let position = ordered.firstIndex(where: { $0.id == id }),
+              ordered.indices.contains(position + offset) else {
+            return
+        }
+        ordered.swapAt(position, position + offset)
+        for index in ordered.indices {
+            ordered[index].sortOrder = index
+        }
+        subscriptions = ordered
+        persist()
     }
 
     func refreshWidgets() {
