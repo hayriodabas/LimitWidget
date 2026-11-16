@@ -105,14 +105,16 @@ private struct ProviderRingCell: View {
     var showsName: Bool = false
 
     var body: some View {
-        let brand = ProviderBrand.resolve(for: subscription)
         VStack(spacing: 5) {
             UsageRing(ratio: subscription.usageRatio, lineWidth: lineWidth) {
                 GeometryReader { proxy in
-                    ProviderGlyph(key: subscription.effectiveProviderKey, fallbackSymbol: subscription.iconName)
-                        .foregroundStyle(brand.glyphStyle)
-                        .frame(width: proxy.size.width * 0.42, height: proxy.size.width * 0.42)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ProviderMark(
+                        key: subscription.effectiveProviderKey,
+                        name: subscription.providerName,
+                        fallbackSymbol: subscription.iconName
+                    )
+                    .frame(width: proxy.size.width * 0.46, height: proxy.size.width * 0.46)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .aspectRatio(1, contentMode: .fit)

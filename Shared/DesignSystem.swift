@@ -45,18 +45,123 @@ enum UsageTone {
     }
 }
 
+// MARK: - Provider logos
+
+/// Sağlayıcının gerçek logosu (LobeHub Icons koleksiyonundan; markalar sahiplerine aittir).
+struct ProviderLogo: Sendable {
+    /// Renkli logo görseli; yoksa tek renkli logo `markOnTile` rengiyle boyanır.
+    let colorAsset: String?
+    /// Tek renkli (şablon) logo; masaüstü tek renk modunda ve renkli görseli olmayanlarda kullanılır.
+    let monoAsset: String
+    /// Simge karesinin zemin rengi.
+    let tile: Color
+    /// Tek renkli logonun kare üzerindeki rengi.
+    let markOnTile: Color
+    /// Logonun kare içindeki boyu (kenar uzunluğuna oran).
+    let markScale: CGFloat
+    /// Açık renkli zeminlerde ince kenar çizgisi gerekir.
+    let isLightTile: Bool
+
+    static func resolve(key: String, name: String) -> ProviderLogo? {
+        let lower = name.lowercased()
+        switch key {
+        case LocalProviderKey.claudeCode.rawValue:
+            return ProviderLogo(
+                colorAsset: "logo-claudecode",
+                monoAsset: "logo-claudecode-mono",
+                tile: Color(red: 0.96, green: 0.94, blue: 0.90),
+                markOnTile: Color(red: 0.85, green: 0.47, blue: 0.34),
+                markScale: 0.70,
+                isLightTile: true
+            )
+        case LocalProviderKey.antigravity.rawValue:
+            return ProviderLogo(
+                colorAsset: "logo-antigravity",
+                monoAsset: "logo-antigravity-mono",
+                tile: .white,
+                markOnTile: .black,
+                markScale: 0.62,
+                isLightTile: true
+            )
+        case LocalProviderKey.codex.rawValue:
+            return ProviderLogo(
+                colorAsset: "logo-codex",
+                monoAsset: "logo-codex-mono",
+                tile: .white,
+                markOnTile: .black,
+                markScale: 0.70,
+                isLightTile: true
+            )
+        case LocalProviderKey.opencode.rawValue:
+            return ProviderLogo(
+                colorAsset: nil,
+                monoAsset: "logo-opencode-mono",
+                tile: Color(red: 0.09, green: 0.09, blue: 0.10),
+                markOnTile: .white,
+                markScale: 0.56,
+                isLightTile: false
+            )
+        default:
+            break
+        }
+
+        if lower.contains("cursor") {
+            return ProviderLogo(
+                colorAsset: nil,
+                monoAsset: "logo-cursor-mono",
+                tile: Color(red: 0.08, green: 0.08, blue: 0.08),
+                markOnTile: .white,
+                markScale: 0.58,
+                isLightTile: false
+            )
+        }
+        if lower.contains("copilot") {
+            return ProviderLogo(
+                colorAsset: nil,
+                monoAsset: "logo-githubcopilot-mono",
+                tile: Color(red: 0.14, green: 0.16, blue: 0.18),
+                markOnTile: .white,
+                markScale: 0.64,
+                isLightTile: false
+            )
+        }
+        if lower.contains("windsurf") {
+            return ProviderLogo(
+                colorAsset: nil,
+                monoAsset: "logo-windsurf-mono",
+                tile: Color(red: 0.04, green: 0.07, blue: 0.08),
+                markOnTile: .white,
+                markScale: 0.66,
+                isLightTile: false
+            )
+        }
+        if lower.contains("deepseek") {
+            return ProviderLogo(
+                colorAsset: "logo-deepseek",
+                monoAsset: "logo-deepseek-mono",
+                tile: .white,
+                markOnTile: .black,
+                markScale: 0.70,
+                isLightTile: true
+            )
+        }
+        return nil
+    }
+}
+
 // MARK: - Provider brand
 
-/// Sağlayıcının simge rengi ve kısa satıcı adı.
+/// Sağlayıcının logo, yedek simge rengi ve kısa satıcı adı.
 struct ProviderBrand: Sendable {
     let key: String
     let tint: Color
     let highlight: Color
     let vendor: String
+    let logo: ProviderLogo?
 
-    /// Nötr zemin üzerinde (halka ortası gibi) işaret rengi; koyu marka rengi koyu temada kaybolmasın diye.
+    /// Nötr zemin üzerinde (halka ortası gibi) yedek işaret rengi.
     var glyphStyle: AnyShapeStyle {
-        key == LocalProviderKey.codex.rawValue ? AnyShapeStyle(.primary) : AnyShapeStyle(tint)
+        AnyShapeStyle(tint)
     }
 
     static func resolve(for subscription: AISubscription) -> ProviderBrand {
@@ -64,41 +169,47 @@ struct ProviderBrand: Sendable {
     }
 
     static func resolve(key: String, name: String) -> ProviderBrand {
+        let logo = ProviderLogo.resolve(key: key, name: name)
         switch key {
         case LocalProviderKey.claudeCode.rawValue:
             return ProviderBrand(
                 key: key,
                 tint: Color(red: 0.80, green: 0.42, blue: 0.29),
                 highlight: Color(red: 0.91, green: 0.56, blue: 0.42),
-                vendor: "Anthropic"
+                vendor: "Anthropic",
+                logo: logo
             )
         case LocalProviderKey.antigravity.rawValue:
             return ProviderBrand(
                 key: key,
                 tint: Color(red: 0.25, green: 0.38, blue: 0.93),
                 highlight: Color(red: 0.36, green: 0.58, blue: 1.00),
-                vendor: "Google"
+                vendor: "Google",
+                logo: logo
             )
         case LocalProviderKey.codex.rawValue:
             return ProviderBrand(
                 key: key,
-                tint: Color(red: 0.12, green: 0.13, blue: 0.15),
-                highlight: Color(red: 0.30, green: 0.32, blue: 0.36),
-                vendor: "OpenAI"
+                tint: Color(red: 0.23, green: 0.30, blue: 1.00),
+                highlight: Color(red: 0.48, green: 0.62, blue: 1.00),
+                vendor: "OpenAI",
+                logo: logo
             )
         case LocalProviderKey.opencode.rawValue:
             return ProviderBrand(
                 key: key,
                 tint: Color(red: 0.91, green: 0.55, blue: 0.05),
                 highlight: Color(red: 0.98, green: 0.72, blue: 0.22),
-                vendor: "OpenCode"
+                vendor: "OpenCode",
+                logo: logo
             )
         default:
             return ProviderBrand(
                 key: key,
                 tint: Color(red: 0.42, green: 0.45, blue: 0.52),
                 highlight: Color(red: 0.58, green: 0.61, blue: 0.68),
-                vendor: "Özel"
+                vendor: "Özel",
+                logo: logo
             )
         }
     }
@@ -186,7 +297,7 @@ struct ProviderGlyph: View {
     }
 }
 
-/// macOS uygulama simgeleri gibi yuvarlatılmış kare içinde beyaz sağlayıcı işareti.
+/// macOS uygulama simgeleri gibi yuvarlatılmış kare içinde sağlayıcının gerçek logosu.
 struct ProviderIcon: View {
     let key: String
     let name: String
@@ -211,26 +322,65 @@ struct ProviderIcon: View {
 
     var body: some View {
         let brand = ProviderBrand.resolve(key: key, name: name)
-        let shape = RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+        // macOS simge biçimine yakın, sürekli eğimli köşe.
+        let shape = RoundedRectangle(cornerRadius: size * 0.235, style: .continuous)
 
-        if renderingMode != .fullColor {
-            // Masaüstü tek renkli (vibrant/accented) çizildiğinde dolu renkli kare gri bir lekeye dönüşür;
-            // bunun yerine hafif zemin üzerinde işareti göster.
-            ZStack {
-                shape.fill(.quaternary)
-                ProviderGlyph(key: key, fallbackSymbol: fallbackSymbol)
-                    .foregroundStyle(.primary)
-                    .frame(width: size * 0.52, height: size * 0.52)
-                    .widgetAccentable()
+        Group {
+            if renderingMode != .fullColor {
+                // Masaüstü tek renkli çizildiğinde dolu renkli kare gri bir lekeye dönüşür;
+                // bunun yerine hafif zemin üzerinde tek renkli logoyu göster.
+                ZStack {
+                    shape.fill(.quaternary)
+                    ProviderMark(key: key, name: name, fallbackSymbol: fallbackSymbol)
+                        .frame(width: size * (brand.logo?.markScale ?? 0.52), height: size * (brand.logo?.markScale ?? 0.52))
+                        .widgetAccentable()
+                }
+            } else if let logo = brand.logo {
+                logoTile(logo: logo, shape: shape)
+            } else {
+                fallbackTile(brand: brand, shape: shape)
             }
-            .frame(width: size, height: size)
-            .accessibilityLabel(name)
-        } else {
-            fullColorIcon(brand: brand, shape: shape)
         }
+        .frame(width: size, height: size)
+        .accessibilityLabel(name)
     }
 
-    private func fullColorIcon(brand: ProviderBrand, shape: RoundedRectangle) -> some View {
+    private func logoTile(logo: ProviderLogo, shape: RoundedRectangle) -> some View {
+        ZStack {
+            shape.fill(logo.tile)
+            shape.fill(
+                LinearGradient(
+                    colors: [Color.white.opacity(logo.isLightTile ? 0 : 0.10), Color.clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            Group {
+                if let asset = logo.colorAsset {
+                    Image(asset)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                } else {
+                    Image(logo.monoAsset)
+                        .renderingMode(.template)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .foregroundStyle(logo.markOnTile)
+                }
+            }
+            .frame(width: size * logo.markScale, height: size * logo.markScale)
+
+            shape.strokeBorder(
+                logo.isLightTile ? Color.black.opacity(0.10) : Color.white.opacity(0.14),
+                lineWidth: 0.5
+            )
+        }
+        .shadow(color: .black.opacity(0.12), radius: size * 0.04, y: size * 0.02)
+    }
+
+    private func fallbackTile(brand: ProviderBrand, shape: RoundedRectangle) -> some View {
         ZStack {
             shape.fill(
                 LinearGradient(
@@ -251,9 +401,38 @@ struct ProviderIcon: View {
                 .foregroundStyle(.white)
                 .frame(width: size * 0.52, height: size * 0.52)
         }
-        .frame(width: size, height: size)
         .shadow(color: .black.opacity(0.14), radius: size * 0.04, y: size * 0.02)
-        .accessibilityLabel(name)
+    }
+}
+
+/// Zeminsiz sağlayıcı logosu (widget halkasının ortası gibi nötr yüzeyler için).
+struct ProviderMark: View {
+    let key: String
+    let name: String
+    var fallbackSymbol: String = "sparkles"
+
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    var body: some View {
+        let brand = ProviderBrand.resolve(key: key, name: name)
+        if let logo = brand.logo {
+            if renderingMode == .fullColor, let asset = logo.colorAsset {
+                Image(asset)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(logo.monoAsset)
+                    .renderingMode(.template)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(.primary)
+            }
+        } else {
+            ProviderGlyph(key: key, fallbackSymbol: fallbackSymbol)
+                .foregroundStyle(renderingMode == .fullColor ? brand.glyphStyle : AnyShapeStyle(.primary))
+        }
     }
 }
 

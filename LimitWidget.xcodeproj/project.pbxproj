@@ -7,7 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0722585C0B4D4700AA278C89 /* ProviderLogos.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C286431CF7438AD89785CFF7 /* ProviderLogos.xcassets */; };
 		0E14BC7354D8549C0718E8BE /* AISubscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0C72DD1C6730C020FD20A4 /* AISubscription.swift */; };
+		1119E26D5C5D64989F5BAFA3 /* ProviderLogos.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C286431CF7438AD89785CFF7 /* ProviderLogos.xcassets */; };
 		14CEB6B0EC8007B250FEDE10 /* AISubscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0C72DD1C6730C020FD20A4 /* AISubscription.swift */; };
 		1A5DFBA31EAED3D5B6468F58 /* LocalUsageCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4999C252C2EA42983FBC66D /* LocalUsageCollector.swift */; };
 		1C1C906D990CAA7C23AB0F3F /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = D6D0F2FB301DAAE9AB3783D6 /* AppIcon.icon */; };
@@ -25,6 +27,7 @@
 		8803627095AC2A807B56AB7C /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36C57AAC5F27195B9C9D0EBD /* AppPreferences.swift */; };
 		8D3A6A7448F2B744924FA817 /* MenuBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2218326545DD27F53E70659 /* MenuBarPopoverView.swift */; };
 		8EBCDCA4EF5A933C934A0EDC /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84B967B94AE0B835B1CF987A /* SettingsView.swift */; };
+		98CEDD494B75607DA1074F84 /* ProviderLogos.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C286431CF7438AD89785CFF7 /* ProviderLogos.xcassets */; };
 		9C5AC36CC901058B245E8169 /* ProviderRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B0592C9762870FCA052E39C /* ProviderRows.swift */; };
 		AE5F8B1E05AE94EDFA3D9F86 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7FE3F745E3767BDB959E616F /* Assets.xcassets */; };
 		BFA35E27491D092ABAEBC703 /* LimitWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 386A4877AE9363BBE0CA4292 /* LimitWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -75,6 +78,7 @@
 		8B0592C9762870FCA052E39C /* ProviderRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRows.swift; sourceTree = "<group>"; };
 		8F9457B190EA04B1B4B12723 /* LimitWidgetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitWidgetTests.swift; sourceTree = "<group>"; };
 		B4999C252C2EA42983FBC66D /* LocalUsageCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalUsageCollector.swift; sourceTree = "<group>"; };
+		C286431CF7438AD89785CFF7 /* ProviderLogos.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = ProviderLogos.xcassets; sourceTree = "<group>"; };
 		CE048668973F8F2F982C8E21 /* LimitWidget.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LimitWidget.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D6D0F2FB301DAAE9AB3783D6 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		D90509268931F344FB10E425 /* SubscriptionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionStore.swift; sourceTree = "<group>"; };
@@ -153,6 +157,7 @@
 				7D0C72DD1C6730C020FD20A4 /* AISubscription.swift */,
 				EEA619C80888CE6674D48EF2 /* DesignSystem.swift */,
 				B4999C252C2EA42983FBC66D /* LocalUsageCollector.swift */,
+				C286431CF7438AD89785CFF7 /* ProviderLogos.xcassets */,
 				8B0592C9762870FCA052E39C /* ProviderRows.swift */,
 				D90509268931F344FB10E425 /* SubscriptionStore.swift */,
 			);
@@ -176,6 +181,7 @@
 			buildConfigurationList = 5417C7D8F1827FE81B90A5EF /* Build configuration list for PBXNativeTarget "LimitWidgetExtension" */;
 			buildPhases = (
 				3C2D4D69917852FCF229BDD4 /* Sources */,
+				C4B1C58D9CC3F23B23F40BE0 /* Resources */,
 				8C3A465C649FDE277870BB64 /* Frameworks */,
 			);
 			buildRules = (
@@ -214,6 +220,7 @@
 			buildConfigurationList = F7FBAE6E639F292A6535A693 /* Build configuration list for PBXNativeTarget "LimitWidgetTests" */;
 			buildPhases = (
 				F2446BDCEFE7F09ED1EF73F3 /* Sources */,
+				F5D32A1BC7563C4D976BE929 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -265,6 +272,23 @@
 			files = (
 				1C1C906D990CAA7C23AB0F3F /* AppIcon.icon in Resources */,
 				AE5F8B1E05AE94EDFA3D9F86 /* Assets.xcassets in Resources */,
+				1119E26D5C5D64989F5BAFA3 /* ProviderLogos.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C4B1C58D9CC3F23B23F40BE0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				98CEDD494B75607DA1074F84 /* ProviderLogos.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F5D32A1BC7563C4D976BE929 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0722585C0B4D4700AA278C89 /* ProviderLogos.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

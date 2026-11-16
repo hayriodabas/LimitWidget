@@ -15,6 +15,10 @@ macOS için menü çubuğunda yaşayan yapay zekâ kota izleyicisi. **Claude Cod
   - **Codex:** `codex app-server` `account/rateLimits/read` (yedek: `state_5.sqlite`).
   - **OpenCode:** `~/.local/share/opencode/auth.json` ve `opencode.ai/zen/go/v1/usage`.
 
+## Logolar
+
+Sağlayıcı logoları [LobeHub Icons](https://github.com/lobehub/lobe-icons) koleksiyonundan (MIT) alınmıştır (`Shared/ProviderLogos.xcassets`). Logolar ve markalar sahiplerine (Anthropic, Google, OpenAI, OpenCode, Anysphere, GitHub, Windsurf, DeepSeek) aittir ve yalnızca ilgili hizmeti tanıtmak için kullanılır.
+
 ## Yapı
 
 - `Shared/DesignSystem.swift` — renk tonları, sağlayıcı simgeleri, kullanım çubuğu ve halkası
